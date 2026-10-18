@@ -18,7 +18,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       targets: ${{ steps.version.outputs.targets }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: version
         env:
           BUILD_ARCH: ${{ inputs.arch }}
@@ -27,16 +27,16 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           cache: false
-      - run: rustup toolchain install 1.96.0 --profile minimal && rustup default 1.96.0
+      - run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt --component clippy && rustup default 1.96.0
       - run: npm ci
       - run: make check test shellcheck workflow-check
       - run: npx playwright install --with-deps chromium
@@ -48,12 +48,12 @@ jobs:
         include: ${{ fromJSON(needs.validate.outputs.targets) }}
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           cache: false
@@ -67,7 +67,7 @@ jobs:
           bash target/dist/deploy-platform-*-linux-${{ matrix.arch }}.run --check
           cd target/dist
           sha256sum -c ./*.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: deploy-platform-linux-${{ matrix.arch }}
           path: target/dist/*

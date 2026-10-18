@@ -19,7 +19,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: current
         name: Skip superseded dev commits before contacting the server
         env:
@@ -33,7 +33,7 @@ jobs:
             echo 'deploy=false' >> "$GITHUB_OUTPUT"
             echo 'A newer dev commit exists; skipping this deployment.'
           fi
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         if: steps.current.outputs.deploy == 'true'
         with:
           name: deploy-platform-linux-${{ vars.TEST_SERVER_ARCH || 'amd64' }}
