@@ -1,4 +1,3 @@
-BEGIN IMMEDIATE;
 CREATE TABLE api_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   request_id TEXT NOT NULL UNIQUE,
@@ -11,4 +10,3 @@ CREATE TABLE api_jobs (
 );
 CREATE INDEX api_jobs_pending ON api_jobs(state,id);
 PRAGMA user_version = 3;
-COMMIT;

@@ -28,6 +28,7 @@ Data and domains:
 Node and troubleshooting:
   status | verify                       Check all installed services and API
   doctor                                Check Agent API/worker only
+  maintenance [status|enter|exit]        Node-local upgrade admission gate
   version | --version                   Print the installed Agent CLI version
   system-logs [agent|control|runtime|proxy]
   token                                 Print private Web login token (sudo)
@@ -88,7 +89,7 @@ case ${1:-help} in
             agent|control|runtime|proxy) system_logs "$@";;
             *) agent logs "$@";;
         esac;;
-    apps|list|apply|deploy|start|stop|diagnostics|job|operations|doctor|routes|route-set|route-delete|secret-create|secrets|volumes|validate|plan)
+    apps|list|apply|deploy|start|stop|diagnostics|job|operations|doctor|maintenance|routes|route-set|route-delete|secret-create|secrets|volumes|validate|plan)
         agent "$@";;
     *) echo "unknown command: $1; use cloudctl help" >&2; exit 2;;
 esac

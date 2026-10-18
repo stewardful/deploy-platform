@@ -12,7 +12,7 @@ rollback() {
     trap - ERR
     set +e
     if [[ ${ACTIVATING:-0} == 1 ]]; then
-        log 'activation failed; restoring previous application files and service configuration'
+        log "activation failed (exit $code); restoring previous application files and service configuration"
         python3 "$SOURCE/lib/state.py" recover --source "$SOURCE" || log 'automatic recovery incomplete; retry installer to resume recovery'
         log "diagnostics: journalctl -u deploy-agent -u deploy-control -u deploy-containerd -n 80; backup: $BACKUP"
         log 'application database was backed up but never automatically downgraded'
@@ -48,33 +48,28 @@ PYPERMISSIONS
     python3 "$SOURCE/lib/state.py" begin --destination "$BACKUP" --cidr "$CIDR"
     ACTIVATING=1
     trap rollback ERR
+    local upgrading=0
+    if [[ -f /etc/deploy-platform/install.json ]]; then
+        upgrading=1
+        log 'rejecting new writes and waiting for accepted deployments to finish'
+        timeout "$DRAIN_SECONDS" python3 "$SOURCE/lib/upgrade.py" drain --timeout "$DRAIN_SECONDS"
+        python3 "$SOURCE/lib/upgrade.py" capture --backup "$BACKUP" --checks-file "$CHECKS_FILE"
+    fi
+    python3 "$SOURCE/lib/state.py" activate
     stop_application_units
-    if [[ -f /var/lib/deploy-platform/agent.sqlite ]]; then
-        python3 - "$BACKUP/agent.sqlite" <<'PY'
-import sqlite3, sys
-source = sqlite3.connect('file:/var/lib/deploy-platform/agent.sqlite?mode=ro', uri=True)
-target = sqlite3.connect(sys.argv[1])
-source.backup(target)
-target.close()
-source.close()
-PY
+    if [[ $upgrading == 1 ]]; then
+        python3 "$SOURCE/lib/upgrade.py" stopped --source "$SOURCE" --backup "$BACKUP"
     fi
     [[ ! -L /etc/deploy-platform-proxy ]] || die 'proxy config parent cannot be a symlink'
     install -d -m 0755 /etc/deploy-platform-proxy
     install -m 0644 "$generated/proxy-bootstrap.json" /etc/deploy-platform-proxy/bootstrap.json
-    if [[ -f /var/lib/deploy-platform/ingress/ingress.sqlite ]]; then
-        python3 - "$BACKUP/ingress.sqlite" <<'PYBACKUP'
-import sqlite3,sys
-with sqlite3.connect('file:/var/lib/deploy-platform/ingress/ingress.sqlite?mode=ro',uri=True) as src:
-    with sqlite3.connect(sys.argv[1]) as dst: src.backup(dst)
-PYBACKUP
-    fi
     install -d -m 0700 /etc/deploy-platform /etc/deploy-platform/cni /var/lib/deploy-platform
     install -m 0600 "$generated/containerd.toml" /etc/deploy-platform/containerd.toml
     install -m 0600 "$generated/nerdctl.toml" /etc/deploy-platform/nerdctl.toml
     install -m 0600 "$generated/10-cloud.conflist" /etc/deploy-platform/cni/10-cloud.conflist
     install -m 0755 "$generated/nerdctl" /opt/deploy-platform/nerdctl
-    for unit in deploy-containerd.service deploy-agent.service deploy-control.service deploy-proxy.service; do
+    install -d -m 0700 /var/lib/deploy-platform/updates
+    for unit in deploy-containerd.service deploy-agent.service deploy-control.service deploy-proxy.service deploy-update.service deploy-update.path; do
         install -m 0644 "$SOURCE/systemd/$unit" "/etc/systemd/system/$unit"
     done
     printf 'overlay\nbr_netfilter\n' > /etc/modules-load.d/deploy-platform.conf
@@ -101,6 +96,7 @@ PY
     ln -sfn /opt/deploy-platform/current/cloudctl /usr/local/bin/cloudctl
     python3 "$SOURCE/lib/state.py" receipt --source "$SOURCE" --cidr "$CIDR" --phase activating
     systemctl daemon-reload
+    systemctl enable --now deploy-update.path
     systemctl enable --now deploy-containerd.service
     local ready=0 attempt
     for ((attempt=0; attempt<30; attempt++)); do
@@ -115,9 +111,16 @@ PY
     fi
     systemctl enable --now deploy-proxy.service deploy-agent.service deploy-control.service
     python3 "$SOURCE/smoke.py" health --wait 45
+    if [[ $upgrading == 1 ]]; then
+        log 'verifying preserved projects, resources and configured business/HTTPS probes'
+        timeout "$VERIFY_SECONDS" python3 "$SOURCE/lib/upgrade.py" verify --backup "$BACKUP" --timeout "$VERIFY_SECONDS"
+    fi
     python3 "$SOURCE/lib/state.py" receipt --source "$SOURCE" --cidr "$CIDR" --phase ready
     python3 "$SOURCE/lib/state.py" commit
     ACTIVATING=0
     trap - ERR
+    if [[ $upgrading == 1 ]]; then
+        python3 "$SOURCE/lib/upgrade.py" resume
+    fi
     log "installed $VERSION ($HOST_ARCH); database/config backup: $BACKUP"
 }

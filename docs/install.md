@@ -6,15 +6,15 @@
 
 在可信构建机生成安装包，或从自己的 CI 下载对应架构产物。服务器 `uname -m` 为 `x86_64` 选 `amd64`，为 `aarch64` 选 `arm64`。建议为镜像和版本备份留至少 10 GiB 可用磁盘；安装器最低检查 2 GiB。镜像仓库和 Ubuntu 软件源需要能访问。包已包含运行时，首次部署仍要拉取应用镜像。
 
-把 `deploy-platform-0.5.0-linux-amd64.run` 和同名 `.sha256` 上传服务器。下面以 amd64 为例，ARM 服务器替换文件名中的架构：
+把 `deploy-platform-0.5.2-linux-amd64.run` 和同名 `.sha256` 上传服务器。下面以 amd64 为例，ARM 服务器替换文件名中的架构：
 
 ```bash
 # 在上传目录，检查可信来源提供的摘要；只上传 .run 时使用下面的完整性自检
-sha256sum --check --ignore-missing deploy-platform-0.5.0-linux-amd64.sha256
-bash deploy-platform-0.5.0-linux-amd64.run --check
+sha256sum --check --ignore-missing deploy-platform-0.5.2-linux-amd64.sha256
+bash deploy-platform-0.5.2-linux-amd64.run --check
 
 # 一条命令安装 Web、控制端、Agent、独立 containerd / nerdctl / runc / CNI
-sudo bash deploy-platform-0.5.0-linux-amd64.run
+sudo bash deploy-platform-0.5.2-linux-amd64.run
 
 sudo cloudctl status
 sudo cloudctl token
@@ -91,6 +91,8 @@ sudo cloudctl smoke
 
 ## 重复安装、升级和失败恢复
 
+0.5.2 起增加升级前兼容性检查、维护排空、隔离数据库预演和已有项目业务验证。**有运行中项目时，先配置只读业务探针**，缺少覆盖会拒绝升级；流程、配置和失败处理见 [升级保障](upgrade.md)。重装同一包也执行这些保护。
+
 相同包可重复运行，保留 token、数据、应用和停止意图；会短暂停止控制端/Agent并重新检查。不同文件摘要的版本必须明确使用 `--upgrade`：
 
 ```bash
@@ -137,23 +139,9 @@ tests/installer/           纯 Python 组件回归测试
 
 ```bash
 make installer-test
-VERSION=0.5.0 make release-build
+VERSION=0.5.2 make release-build
 ```
 
 生成 `target/dist/*.run`、`.tar.gz`、`.sha256`。`package.py` 也可以接收已构建的 `--bin-dir`、`--web-dir` 和 `--runtime-archive`，会检查 ELF 架构和每个文件的摘要。`Dockerfile.agent` 可从其他系统构建 Linux Agent，Go 可交叉编译，Web 产物与架构无关。
 
-`.github/workflows/release.yml` 手动触发，原生 Ubuntu amd64/arm64 分别构建并上传 CI artifacts；当前没有真实发布仓库地址，因此不提供虚构的 `curl | bash` 公网下载命令，也没有自动发布到任何外部仓库。
-
-可选本地集成测试（Docker 仅作为开发测试环境，不是部署依赖）：
-
-```bash
-bash distribution/tests/ubuntu-smoke.sh "$PWD/target/dist/deploy-platform-0.5.0-linux-arm64.run"
-```
-
-要求 Docker 后端架构与安装包一致、允许 privileged、systemd/cgroup v2。脚本创建无主机目录挂载的临时容器，限制 2 CPU / 2 GiB，执行实际运行时和应用测试，退出清理该容器。嵌套测试使用可执行 tmpfs 作为专属数据盘，仅用于规避 overlay 嵌套限制；真实服务器使用正常磁盘。
-
-本地 Ubuntu 容器验证不能替代腾讯云机器的网络、防火墙、断电和整机重启验收。当前未连接真实腾讯云实例；首次上云后应执行 `cloudctl smoke`，再部署测试项目并重启服务器确认开机恢复与停止意图。
-
-0.4 安装包还包含 `deploy-proxy.service` 和固定版本 Caddy，详细公网 DNS、端口、证书与升级边界见 [域名与 HTTPS](ingress.md)。
-
-首次上云请按 [验收清单](acceptance.md) 逐项记录安装、网页、HTTPS、数据和整机重启结果。
+推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送通过 SSH 自动更新指定测试机，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。

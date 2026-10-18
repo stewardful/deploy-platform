@@ -1,0 +1,51 @@
+name: Dev test server deployment
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dev-test-server
+  # Never cancel an installer already changing services on the node.
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/dev'
+    uses: ./.github/workflows/build-installers.yml
+    with:
+      arch: ${{ vars.TEST_SERVER_ARCH || 'amd64' }}
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - id: current
+        name: Skip superseded dev commits before contacting the server
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          latest=$(gh api "repos/$GH_REPO/commits/dev" --jq .sha)
+          if [[ "$latest" == "$GITHUB_SHA" ]]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'deploy=false' >> "$GITHUB_OUTPUT"
+            echo 'A newer dev commit exists; skipping this deployment.'
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.current.outputs.deploy == 'true'
+        with:
+          name: deploy-platform-linux-${{ vars.TEST_SERVER_ARCH || 'amd64' }}
+          path: dist
+      - name: SSH upload and durable independent installer
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          TEST_SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
+          TEST_SSH_KNOWN_HOSTS: ${{ secrets.TEST_SSH_KNOWN_HOSTS }}
+          TEST_SERVER_HOST: ${{ secrets.TEST_SERVER_HOST }}
+          TEST_SERVER_USER: ${{ secrets.TEST_SERVER_USER }}
+          TEST_SERVER_PORT: ${{ secrets.TEST_SERVER_PORT || '22' }}
+          TEST_SERVER_ARCH: ${{ vars.TEST_SERVER_ARCH || 'amd64' }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: bash distribution/ci/deploy-test.sh

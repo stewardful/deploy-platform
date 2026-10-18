@@ -256,3 +256,20 @@ func (c *Client) DeleteRoute(ctx context.Context, input RouteDelete) (RouteRecei
 	err := c.request(ctx, http.MethodPost, "/v1/ingress/delete", input, http.StatusAccepted, &value)
 	return value, err
 }
+
+// Maintenance manages the node-local upgrade gate. nil reads status; true drains; false resumes.
+// This operation is deliberately not exposed through the public control-plane API.
+func (c *Client) Maintenance(ctx context.Context, draining *bool) (Maintenance, error) {
+	method, path := http.MethodGet, "/v1/maintenance"
+	if draining != nil {
+		method = http.MethodPost
+		if *draining {
+			path += "/enter"
+		} else {
+			path += "/exit"
+		}
+	}
+	var value Maintenance
+	err := c.request(ctx, method, path, nil, http.StatusOK, &value)
+	return value, err
+}

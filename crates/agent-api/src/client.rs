@@ -50,6 +50,17 @@ impl Client {
             timeout,
         })
     }
+    pub async fn maintenance(
+        &self,
+        draining: Option<bool>,
+    ) -> Result<crate::Maintenance, ClientError> {
+        let (method, path) = match draining {
+            Some(true) => (Method::POST, "/v1/maintenance/enter"),
+            Some(false) => (Method::POST, "/v1/maintenance/exit"),
+            None => (Method::GET, "/v1/maintenance"),
+        };
+        self.request(method, path, None::<&()>).await
+    }
     pub async fn create_secret(
         &self,
         input: &crate::SecretInput,

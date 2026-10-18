@@ -1,8 +1,8 @@
 # Deploy Platform
 
-面向个人项目和小型服务的单节点部署平台：**React 管理网页 + Go 控制端 + 可独立运行的 Rust Agent + nerdctl/containerd**。生产安装以 Ubuntu 24.04、2 核 2 GiB 为目标，当前版本 0.5.0。
+面向个人项目和小型服务的单节点部署平台：**React 管理网页 + Go 控制端 + 可独立运行的 Rust Agent + nerdctl/containerd**。生产安装以 Ubuntu 24.04、2 核 2 GiB 为目标，当前版本 0.5.2。
 
-支持预构建镜像部署、应用启停与恢复、项目网络和服务名、数据卷与密钥、日志与 HTTP 健康检查、域名绑定和自动 HTTPS。节点不需要 Node.js 常驻，也不在服务器编译源码。AI API 应用使用相同部署模型；GPU 调度和本地大模型容量不在当前范围。
+支持[版本发现与网页手动升级](docs/updates.md)、预构建镜像部署、应用启停与恢复、项目网络和服务名、数据卷与密钥、日志与 HTTP 健康检查、域名绑定和自动 HTTPS。节点不需要 Node.js 常驻，也不在服务器编译源码。AI API 应用使用相同部署模型；GPU 调度和本地大模型容量不在当前范围。
 
 ## 从这里开始
 
@@ -10,9 +10,10 @@
 | --- | --- |
 | 理解目录、组件和请求流程 | [项目地图](docs/project-map.md) |
 | 在腾讯云从零安装并部署前后端/数据库/HTTPS | [完整操作手册](docs/tencent-ubuntu-walkthrough.md) |
+| 升级平台并保护已有项目 | [升级保障与业务探针](docs/upgrade.md) |
 | 使用已有安装包 | [安装、升级与排错](docs/install.md) |
 | 开发或修改代码 | [开发指南](CONTRIBUTING.md) |
-| 查看当前测试证据与验证边界 | [0.5.0 模块审查与验收](docs/crate-review.md) |
+| 查看当前测试证据与验证边界 | [0.5.2 升级保障验收](docs/upgrade-validation.md) |
 | 查看历史完整运行基线 | [0.4.1 测试与修复报告](docs/test-report-0.4.md) |
 | 查找其他说明 | [文档目录](docs/README.md) |
 
@@ -38,8 +39,8 @@ docs/            设计、使用、验收和维护说明
 在服务器上传目录执行对应架构的安装包；x86_64 使用 amd64，aarch64 使用 arm64：
 
 ```bash
-bash deploy-platform-0.5.0-linux-amd64.run --check
-sudo bash deploy-platform-0.5.0-linux-amd64.run
+bash deploy-platform-0.5.2-linux-amd64.run --check
+sudo bash deploy-platform-0.5.2-linux-amd64.run
 sudo cloudctl verify
 sudo cloudctl token
 ```
@@ -71,4 +72,4 @@ make web-e2e
 - 后台恢复针对容器进程；HTTP 健康检查为按需快照，不自动触发重启或后台告警。
 - 本地 Ubuntu ARM64 已完成真实运行验收；AMD64 与公网云节点的验证边界见测试报告。2 GiB 不代表可以运行任意数量的服务或本地大模型。
 
-Rust 组件暂设 `publish = false`，Go 模块使用本地模块路径。正式对外发布前需确定实际仓库路径、许可证、公共 API 和版本策略；本项目没有自动推送或对外发布行为。
+Rust 组件暂设 `publish = false`，Go 模块使用本地模块路径。正式对外发布前需确定实际仓库路径、许可证、公共 API 和版本策略；推送 main 会触发 GitHub Release 工作流，dev 推送自动部署专用测试机，配置见 [CI/CD](docs/ci-cd.md)；服务器只检查更新，必须由管理员确认升级。组件库本身尚未发布至 crates.io/npm/Go 公共模块。

@@ -35,7 +35,17 @@ impl Harness {
         .unwrap();
         let bound = BoundServer::bind(socket).await.unwrap();
         let shutdown = CancellationToken::new();
-        let server = tokio::spawn(bound.serve(service.api(), shutdown.clone()));
+        let resources = std::sync::Arc::new(
+            node_resources::NodeResources::open(state.join("resources")).unwrap(),
+        );
+        let api = std::sync::Arc::new(node_resources::ResourceApi::new(service.api(), resources));
+        let api = ingress::IngressService::open(
+            api,
+            std::sync::Arc::new(support::Proxy),
+            &state.join("ingress"),
+        )
+        .unwrap();
+        let server = tokio::spawn(bound.serve(api, shutdown.clone()));
         Self {
             service: Some(service),
             server: Some(server),
@@ -88,6 +98,98 @@ async fn wait_pull(runtime: &support::Runtime) {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn maintenance_drains_accepted_work_rejects_new_jobs_and_resumes() {
+    let (_root, state, socket) = paths();
+    let runtime = support::Runtime::default();
+    runtime.blocked.store(true, Ordering::SeqCst);
+    let harness = Harness::start(&state, &socket, runtime.clone(), 4).await;
+    let job = harness
+        .client
+        .submit(&submission("before-upgrade"))
+        .await
+        .unwrap();
+    wait_pull(&runtime).await;
+    let draining = harness.client.maintenance(Some(true)).await.unwrap();
+    assert!(draining.draining);
+    assert!(!draining.quiescent);
+    assert!(draining.pending_jobs > 0);
+    assert!(
+        matches!(harness.client.submit(&submission("during-upgrade")).await,
+        Err(ClientError::Api(error)) if error.code == ErrorCode::Unavailable)
+    );
+    assert!(
+        matches!(harness.client.create_secret(&agent_api::SecretInput {
+        project: support::spec().app.project.clone(), name: app_model::Identifier::new("blocked").unwrap(), value: "test-only-value".into()
+    }).await, Err(ClientError::Api(error)) if error.code == ErrorCode::Unavailable)
+    );
+    assert!(
+        matches!(harness.client.change_route(&ingress_model::RouteChange {
+        expected_revision: 0,
+        route: ingress_model::DomainRoute { domain: ingress_model::DomainName::new("upgrade.github.io").unwrap(), app: support::spec().app, port: 8080, tls: Default::default(), enabled: true }
+    }).await, Err(ClientError::Api(error)) if error.code == ErrorCode::Unavailable)
+    );
+    // Reads continue, and the job was not cancelled by entering maintenance.
+    assert_eq!(
+        harness.client.job(job.id).await.unwrap().state,
+        JobState::Running
+    );
+    runtime.blocked.store(false, Ordering::SeqCst);
+    runtime.gate.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !harness.client.maintenance(None).await.unwrap().quiescent {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        harness.client.job(job.id).await.unwrap().state,
+        JobState::Succeeded
+    );
+    harness.client.maintenance(Some(false)).await.unwrap();
+    assert!(
+        harness
+            .client
+            .submit(&submission("after-upgrade"))
+            .await
+            .is_ok()
+    );
+    harness.stop().await;
+}
+
+#[tokio::test]
+async fn upgrade_start_drained_blocks_boot_recovery_until_resume() {
+    use agent_core::DeploymentStore;
+    let (_root, state, _socket) = paths();
+    let mut store = SqliteStore::open(&state, "api-test").unwrap();
+    let spec = support::spec();
+    store.begin(&spec, &spec.fingerprint().unwrap()).unwrap();
+    let runtime = support::Runtime::default();
+    let service = Service::start(
+        runtime.clone(),
+        store,
+        ServiceOptions {
+            start_drained: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let api = service.api();
+    assert!(api.maintenance(None).await.unwrap().draining);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(runtime.creates(), 0);
+    api.maintenance(Some(false)).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while runtime.creates() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    service.shutdown().await.unwrap();
 }
 
 #[tokio::test]

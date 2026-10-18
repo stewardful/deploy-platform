@@ -24,6 +24,9 @@ struct Options {
     /// Perform one recovery pass and exit (useful for explicit integration checks).
     #[arg(long)]
     once: bool,
+    /// Offline validation/migration rehearsal. Only use on an isolated state copy.
+    #[arg(long, conflicts_with = "once")]
+    check_state: bool,
     #[arg(long, default_value = "/run/deploy-platform/agent.sock")]
     socket: PathBuf,
     #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u32).range(1..=128))]
@@ -49,6 +52,26 @@ async fn shutdown_signal() -> Result<(), String> {
 }
 
 async fn run(options: Options) -> Result<(), String> {
+    if options.check_state {
+        use agent_core::DeploymentStore;
+        let target = options.host.target()?;
+        let store =
+            SqliteStore::open(&options.host.state_dir, &target).map_err(|e| e.to_string())?;
+        for app in store.applications().map_err(|e| e.to_string())? {
+            let spec = store
+                .spec(&app.app)
+                .map_err(|e| e.to_string())?
+                .ok_or("missing app spec")?;
+            spec.validate().map_err(|e| e.to_string())?;
+            if spec.fingerprint().map_err(|e| e.to_string())? != app.fingerprint {
+                return Err("persisted fingerprint mismatch".into());
+            }
+        }
+        ingress::validate_state(&options.host.state_dir.join("ingress"))
+            .map_err(|e| e.to_string())?;
+        println!("state copy validated; no runtime operations executed");
+        return Ok(());
+    }
     if !cfg!(target_os = "linux") {
         return Err("agentd runtime recovery requires Linux".into());
     }
@@ -79,6 +102,18 @@ async fn run(options: Options) -> Result<(), String> {
             ServiceOptions {
                 poll_interval: Duration::from_secs(options.poll_seconds),
                 queue_capacity: options.queue_capacity,
+                start_drained: {
+                    use std::os::unix::fs::PermissionsExt;
+                    let marker = options.host.state_dir.join("upgrade-maintenance");
+                    match std::fs::symlink_metadata(marker) {
+                        Ok(meta) if meta.is_file() && meta.permissions().mode() & 0o077 == 0 => {
+                            true
+                        }
+                        Ok(_) => return Err("upgrade marker must be a private regular file".into()),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                        Err(_) => return Err("cannot inspect upgrade marker".into()),
+                    }
+                },
                 recovery,
             },
         )

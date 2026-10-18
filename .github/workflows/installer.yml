@@ -7,4 +7,4 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: make installer-test shellcheck
+      - run: make installer-test shellcheck workflow-check

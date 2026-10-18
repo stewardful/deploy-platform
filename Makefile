@@ -67,11 +67,15 @@ installer-test:
 	$(MAKE) installer-check
 
 installer-check:
-	bash -n distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/tests/ubuntu-smoke.sh
+	bash -n distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh
 
 shellcheck:
-	shellcheck -x distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/tests/ubuntu-smoke.sh
+	shellcheck -x distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh
 
 # Run on a native Linux build machine. Target servers receive only the resulting .run.
 release-build:
 	bash distribution/release/build.sh
+
+.PHONY: workflow-check
+workflow-check:
+	bash distribution/ci/lint-workflows.sh

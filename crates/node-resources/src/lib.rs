@@ -268,6 +268,16 @@ impl ResourceApi {
 }
 #[async_trait]
 impl AgentApi for ResourceApi {
+    fn acquire_write(&self) -> agent_api::Result<agent_api::WritePermit> {
+        self.inner.acquire_write()
+    }
+    async fn maintenance(
+        &self,
+        draining: Option<bool>,
+    ) -> agent_api::Result<agent_api::Maintenance> {
+        self.inner.maintenance(draining).await
+    }
+
     async fn publication_target(&self, app: AppKey) -> Result<Option<std::net::Ipv4Addr>> {
         self.inner.publication_target(app).await
     }
@@ -302,10 +312,14 @@ impl AgentApi for ResourceApi {
         self.inner.submit(submission).await
     }
     async fn create_secret(&self, input: SecretInput) -> Result<SecretInfo> {
+        let permit = self.acquire_write()?;
         let resources = self.resources.clone();
-        tokio::task::spawn_blocking(move || resources.create_secret(input))
-            .await
-            .map_err(|_| internal())?
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            resources.create_secret(input)
+        })
+        .await
+        .map_err(|_| internal())?
     }
     async fn secrets(&self, project: Identifier) -> Result<Vec<SecretInfo>> {
         let resources = self.resources.clone();

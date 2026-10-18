@@ -4,17 +4,21 @@ set -Eeuo pipefail
 umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PYTHONDONTWRITEBYTECODE=1
-SOURCE='' SKIP_APT=0 UPGRADE=0 SMOKE=0 CIDR=''
+SOURCE='' SKIP_APT=0 UPGRADE=0 SMOKE=0 CIDR='' DRAIN_SECONDS=300 VERIFY_SECONDS=120 CHECKS_FILE=/etc/deploy-platform/upgrade-checks.json
 while (( $# )); do
     case $1 in
         --source) [[ -z $SOURCE && $# -ge 2 ]] || exit 2; SOURCE=$2; shift 2;;
         --skip-apt) SKIP_APT=1; shift;;
         --upgrade) UPGRADE=1; shift;;
+        --drain-seconds) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || exit 2; DRAIN_SECONDS=$2; shift 2;;
+        --verify-seconds) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || exit 2; VERIFY_SECONDS=$2; shift 2;;
+        --checks-file) [[ $# -ge 2 && $2 == /* ]] || exit 2; CHECKS_FILE=$2; shift 2;;
         --smoke-test) SMOKE=1; shift;;
         --bridge-cidr) [[ $# -ge 2 ]] || exit 2; CIDR=$2; shift 2;;
         *) printf 'unknown option: %s\n' "$1" >&2; exit 2;;
     esac
 done
+(( DRAIN_SECONDS >= 10 && DRAIN_SECONDS <= 3600 && VERIFY_SECONDS >= 10 && VERIFY_SECONDS <= 3600 )) || exit 2
 [[ $SOURCE == /* && -f $SOURCE/lib/host.sh ]] || { echo 'validated release directory required' >&2; exit 2; }
 # shellcheck source=lib/host.sh
 source "$SOURCE/lib/host.sh"
@@ -48,6 +52,7 @@ PY
     CIDR=$SAVED_CIDR
 fi
 if ip link show cloud0 >/dev/null 2>&1 && [[ ! -f /etc/deploy-platform/install.json ]]; then die 'unmanaged cloud0 bridge exists'; fi
+python3 "$SOURCE/lib/upgrade.py" preflight --source "$SOURCE" --checks-file "$CHECKS_FILE"
 install_dependencies
 WORK=$(mktemp -d /var/tmp/cloud-install.XXXXXXXX)
 trap 'rm -rf -- "$WORK"' EXIT

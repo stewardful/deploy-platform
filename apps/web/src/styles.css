@@ -1079,3 +1079,13 @@ i.gray {
     gap: 12px;
   }
 }
+
+.platform-updates {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--td-component-border);
+  border-radius: 8px;
+}
+.platform-updates .t-alert {
+  margin-top: 12px;
+}

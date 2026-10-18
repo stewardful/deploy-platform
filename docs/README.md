@@ -6,6 +6,7 @@
 | --- | --- |
 | [腾讯云 Ubuntu 完整手册](tencent-ubuntu-walkthrough.md) | 从上传安装包到四服务、域名、HTTPS、重启验收 |
 | [安装与升级](install.md) | 文件布局、systemd、升级/失败恢复、安装包构建 |
+| [0.5.1 升级保障](upgrade.md) | 兼容性预检、任务排空、迁移预演、原项目与 HTTPS 数据验证 |
 | [四服务项目](fullstack.md) | 项目网络、服务名、日志、健康、前后端示例 |
 | [数据卷与密钥](stateful.md) | PostgreSQL/Redis、卷保留、密钥边界 |
 | [域名与 HTTPS](ingress.md) | 域名、代理、证书、同步和排错 |
@@ -30,6 +31,8 @@
 
 ## 验收与历史证据
 
+当前升级保障的执行结果见 [0.5.1 升级验收](upgrade-validation.md)，操作说明见 [升级保障](upgrade.md)。
+
 先用 [验收清单](acceptance.md)，当前模块/命令回归看 [0.5 审查与验收](crate-review.md)，之前的完整运行基线见 [0.4.1 测试与修复报告](test-report-0.4.md)。以下记录保留当时的版本和执行边界，历史数据不表示当前云节点已经验证：
 
 - [0.1/0.2 安装与有状态验收](install-validation.md)
@@ -37,3 +40,8 @@
 - [0.4 HTTPS 验收](ingress-validation.md)
 - [目录重构记录](repository-refactor.md)
 - [0.5.0 首次提交前检查](pre-git-audit.md)
+
+- [版本发现与网页升级](updates.md)：GitHub Release、私有仓库凭据、升级状态和恢复。
+- [0.5.2 网页升级验收](update-validation.md)：测试结果、隔离系统级流程及未验证边界。
+
+- [dev/main CI/CD](ci-cd.md)：测试机 SSH 配置、自动部署、正式发版和排错。

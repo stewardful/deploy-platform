@@ -10,13 +10,14 @@ Type=simple
 # Agent's default socket is root-only. This is a trusted single-node admin service.
 User=root
 UMask=0077
-ExecStart=/opt/deploy-platform/current/bin/controld --listen 127.0.0.1:8088 --agent-socket /run/deploy-platform/agent.sock --token-file /etc/deploy-platform/control.token --web-dir /opt/deploy-platform/current/web
+ExecStart=/opt/deploy-platform/current/bin/controld --listen 127.0.0.1:8088 --agent-socket /run/deploy-platform/agent.sock --token-file /etc/deploy-platform/control.token --web-dir /opt/deploy-platform/current/web --updates-dir /var/lib/deploy-platform/updates
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10
 Environment=GOMEMLIMIT=64MiB
 NoNewPrivileges=true
 ProtectSystem=strict
+ReadWritePaths=/var/lib/deploy-platform/updates
 ProtectHome=true
 PrivateTmp=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

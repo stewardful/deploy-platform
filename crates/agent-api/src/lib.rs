@@ -1,6 +1,8 @@
 //! Agent v1 DTOs and service ports, with optional Unix HTTP client/server features.
+mod maintenance;
 use app_model::{AppKey, AppSpec};
 use async_trait::async_trait;
+pub use maintenance::{WriteGate, WritePermit};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -42,6 +44,7 @@ impl ApiError {
 pub struct Health {
     pub api_version: String,
     pub service_version: String,
+    /// Worker availability, including draining accepted jobs. Admission is in Maintenance.
     pub accepting: bool,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -219,6 +222,17 @@ pub trait JobRepository {
 
 #[async_trait]
 pub trait AgentApi: Send + Sync {
+    /// Composition-only admission port. Move this permit into any detached write.
+    fn acquire_write(&self) -> Result<WritePermit> {
+        Ok(WritePermit::untracked())
+    }
+    /// None queries status; true drains; false resumes. Not exposed by the Go API.
+    async fn maintenance(&self, _draining: Option<bool>) -> Result<Maintenance> {
+        Err(ApiError::new(
+            ErrorCode::Unavailable,
+            "maintenance is not supported",
+        ))
+    }
     async fn routes(&self) -> Result<ingress_model::IngressSnapshot> {
         Err(ApiError::new(
             ErrorCode::Unavailable,
@@ -284,6 +298,14 @@ pub trait AgentApi: Send + Sync {
     async fn operations(&self, limit: u16) -> Result<Vec<Operation>>;
     async fn submit(&self, submission: Submission) -> Result<Job>;
     async fn job(&self, id: i64) -> Result<Job>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Maintenance {
+    pub draining: bool,
+    pub pending_jobs: u32,
+    pub active_writers: u32,
+    pub quiescent: bool,
 }
 
 pub use runtime_api::{Diagnostics, LogSnapshot};

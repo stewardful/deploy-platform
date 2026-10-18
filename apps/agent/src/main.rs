@@ -22,6 +22,12 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
+#[derive(Clone, clap::ValueEnum)]
+enum MaintenanceAction {
+    Status,
+    Enter,
+    Exit,
+}
 #[derive(Args)]
 struct SubmitOptions {
     /// Reuse this key with the same request after an uncertain submission.
@@ -45,6 +51,11 @@ enum Commands {
     /// Check API/worker availability, not application or containerd health.
     #[command(visible_alias = "status")]
     Doctor,
+    /// Node-local upgrade gate. Enter rejects writes and drains accepted jobs.
+    Maintenance {
+        #[arg(value_enum, default_value = "status")]
+        action: MaintenanceAction,
+    },
     /// Deploy a TOML/JSON application; default waits for the durable job result.
     #[command(visible_alias = "deploy")]
     Apply {
@@ -331,6 +342,19 @@ async fn run(cli: Cli) -> Result<(), String> {
                         .await
                         .map_err(|e| e.to_string())?,
                 )?,
+                Commands::Maintenance { action } => {
+                    let draining = match action {
+                        MaintenanceAction::Status => None,
+                        MaintenanceAction::Enter => Some(true),
+                        MaintenanceAction::Exit => Some(false),
+                    };
+                    print_json(
+                        &client
+                            .maintenance(draining)
+                            .await
+                            .map_err(|e| e.to_string())?,
+                    )?;
+                }
                 Commands::Doctor => {
                     let health = client.health().await.map_err(|e| e.to_string())?;
                     if health.api_version != agent_api::API_VERSION || !health.accepting {

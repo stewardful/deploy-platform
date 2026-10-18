@@ -32,5 +32,5 @@ install_dependencies() {
         DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 update
         DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends "${missing[@]}"
     fi
-    for package in python3 curl ip iptables modprobe openssl flock; do require_command "$package"; done
+    for package in python3 curl ip iptables modprobe openssl flock timeout; do require_command "$package"; done
 }

@@ -76,6 +76,10 @@ def proxy_subset(source, destination, arch):
 def package(args):
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?", args.version):
         raise ValueError("invalid version")
+    workspace = (ROOT / 'Cargo.toml').read_text().split('[workspace.package]', 1)[1].split('[', 1)[0]
+    expected = re.search(r'^version\s*=\s*"([^"]+)"', workspace, re.MULTILINE).group(1)
+    if args.version != expected:
+        raise ValueError('release version must match the Rust workspace version')
     lock = json.loads((ROOT / "distribution/release/runtime.lock.json").read_text())
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -110,8 +114,9 @@ def package(args):
         shutil.copyfile(ROOT / "docs/stateful.md", stage / "STATEFUL.md")
         shutil.copyfile(ROOT / "docs/fullstack.md", stage / "FULLSTACK.md")
         shutil.copyfile(ROOT / "docs/ingress.md", stage / "INGRESS.md")
+        shutil.copyfile(ROOT / "docs/upgrade.md", stage / "UPGRADE.md")
         files = {p.relative_to(stage).as_posix(): archive.digest(p) for p in sorted(stage.rglob("*")) if p.is_file()}
-        manifest = {"schema_version": 1, "version": args.version, "arch": args.arch, "runtime": lock, "files": files}
+        manifest = {"schema_version": 1, "version": args.version, "arch": args.arch, "runtime": lock, "proxy": json.loads((ROOT / "distribution/release/proxy.lock.json").read_text()), "compatibility": json.loads((ROOT / "distribution/release/compatibility.json").read_text()), "files": files}
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         archive.verify(stage, args.arch)
         stem = "deploy-platform-" + args.version + "-linux-" + args.arch
@@ -133,7 +138,7 @@ def package(args):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--arch", choices=("amd64", "arm64"), required=True)
-    p.add_argument("--version", default="0.5.0")
+    p.add_argument("--version", default="0.5.2")
     p.add_argument("--bin-dir", required=True)
     p.add_argument("--web-dir", default=str(ROOT / "apps/web/dist"))
     p.add_argument("--runtime-archive", required=True)

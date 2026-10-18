@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Deploy Platform local Agent API",
-    "version": "0.5.0",
+    "version": "0.5.2",
     "description": "HTTP/1.1 + JSON over a Unix Domain Socket only. Filesystem permissions grant full trusted node-management access. Default socket /run/deploy-platform/agent.sock; no TCP listener, token or remote transport. All integer IDs/timestamps should use 64-bit types in Go. New response fields may be added within v1; clients should ignore unknown fields. No automatic retry of mutations without a stable request_id."
   },
   "servers": [
@@ -517,6 +517,69 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/maintenance": {
+      "get": {
+        "operationId": "maintenanceStatus",
+        "description": "Node-local upgrade gate. Enter rejects new mutations, drains accepted jobs and pauses recovery. No Go/control-plane route.",
+        "responses": {
+          "200": {
+            "description": "Gate and worker status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Maintenance"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Maintenance unsupported or worker unavailable"
+          }
+        }
+      }
+    },
+    "/v1/maintenance/enter": {
+      "post": {
+        "operationId": "enterMaintenance",
+        "description": "Node-local upgrade gate. Enter rejects new mutations, drains accepted jobs and pauses recovery. No Go/control-plane route.",
+        "responses": {
+          "200": {
+            "description": "Gate and worker status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Maintenance"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Maintenance unsupported or worker unavailable"
+          }
+        }
+      }
+    },
+    "/v1/maintenance/exit": {
+      "post": {
+        "operationId": "exitMaintenance",
+        "description": "Node-local upgrade gate. Enter rejects new mutations, drains accepted jobs and pauses recovery. No Go/control-plane route.",
+        "responses": {
+          "200": {
+            "description": "Gate and worker status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Maintenance"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Maintenance unsupported or worker unavailable"
           }
         }
       }
@@ -1505,6 +1568,31 @@
           }
         },
         "description": "Served certificate metadata from fixed local 127.0.0.1:443 SNI probe; never exports keys."
+      },
+      "Maintenance": {
+        "type": "object",
+        "required": [
+          "draining",
+          "pending_jobs",
+          "active_writers",
+          "quiescent"
+        ],
+        "properties": {
+          "draining": {
+            "type": "boolean"
+          },
+          "pending_jobs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_writers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "quiescent": {
+            "type": "boolean"
+          }
+        }
       }
     }
   },

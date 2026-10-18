@@ -231,11 +231,29 @@ export interface LogSnapshot {
   text: string;
   tail: number;
 }
+export interface PlatformUpdate {
+  enabled: boolean;
+  current: string;
+  candidate: { version: string; asset_id: number; size: number; digest: string } | null;
+  checked_at: string;
+  error: string;
+  execution: { version: string; phase: string; message: string } | null;
+}
+
 export class ControlClient {
   constructor(
     private token: string,
     private fetcher: typeof fetch = (input, init) => globalThis.fetch(input, init),
   ) {}
+  async updates(): Promise<PlatformUpdate> {
+    return this.request('/api/v1/updates');
+  }
+  async checkUpdates(): Promise<PlatformUpdate> {
+    return this.request('/api/v1/updates/check', {});
+  }
+  async upgrade(version: string): Promise<PlatformUpdate> {
+    return this.request('/api/v1/updates/upgrade', { version });
+  }
   async routes(): Promise<IngressSnapshot> {
     return this.get<IngressSnapshot>('/api/v1/ingress');
   }
@@ -335,7 +353,9 @@ export class ControlClient {
       | Submission['body']
       | SecretInput
       | { route: DomainRoute; expected_revision: number }
-      | { domain: string; expected_revision: number },
+      | { domain: string; expected_revision: number }
+      | { version: string }
+      | Record<string, never>,
     signal?: AbortSignal,
   ): Promise<T> {
     const controller = new AbortController();

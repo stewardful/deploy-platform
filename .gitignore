@@ -31,3 +31,6 @@ __pycache__/
 /secrets/
 /.vscode/
 /.idea/
+
+# Downloaded CI delivery artifacts.
+/dist/

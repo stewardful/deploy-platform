@@ -60,6 +60,9 @@ impl SqliteStore {
                     "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;",
                 )
                 .map_err(unavailable)?;
+            connection
+                .execute_batch("BEGIN IMMEDIATE")
+                .map_err(unavailable)?;
             let version: u32 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .map_err(unavailable)?;
@@ -104,6 +107,7 @@ impl SqliteStore {
             // Acquiring the exclusive lease proves there is no live writer using this directory.
             connection.execute("UPDATE applications SET phase=?1 WHERE name IN (SELECT name FROM operations WHERE phase NOT IN (?2,?3,?1))", params![encode_phase(Phase::Interrupted)?, encode_phase(Phase::Succeeded)?, encode_phase(Phase::Failed)?]).map_err(unavailable)?;
             connection.execute("UPDATE operations SET phase=?1, updated_at=CURRENT_TIMESTAMP WHERE phase NOT IN (?1,?2,?3)", params![encode_phase(Phase::Interrupted)?, encode_phase(Phase::Succeeded)?, encode_phase(Phase::Failed)?]).map_err(unavailable)?;
+            connection.execute_batch("COMMIT").map_err(unavailable)?;
             Ok(Self {
                 connection,
                 _lease: lease,
