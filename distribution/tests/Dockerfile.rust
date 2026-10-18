@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1
+# Build and run portable tests on Linux; export the opt-in runtime test separately.
+FROM rust:1.96-slim-bookworm AS tests
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY apps/agent ./apps/agent
+COPY examples ./examples
+RUN --mount=type=cache,id=cloud-agent-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cloud-agent-tests-linux,target=/src/target,sharing=locked \
+    mkdir -p target/debug/deps && \
+    find target/debug/deps -maxdepth 1 -type f -name 'linux_apply-*' -executable -delete && \
+    cargo test --workspace --locked -j 1 && \
+    mkdir -p /output/bin && \
+    cp target/debug/agentd target/debug/agentctl /output/bin/ && \
+    find target/debug/deps -maxdepth 1 -type f -name 'linux_apply-*' -executable -exec cp '{}' /output/linux_apply \;
+FROM rust:1.85-slim-bookworm AS msrv
+WORKDIR /src
+COPY --from=tests /src /src
+RUN --mount=type=cache,id=cloud-agent-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cloud-agent-msrv-linux,target=/src/target,sharing=locked \
+    cargo check --workspace --all-targets --locked -j 1
+
+FROM scratch AS artifacts
+COPY --from=tests /output /output

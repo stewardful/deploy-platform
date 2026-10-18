@@ -1,0 +1,4 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloud 完整部署示例</title>
+<style>body{max-width:700px;margin:80px auto;padding:24px;font:17px system-ui;color:#17253d;background:#f7f9fc}button{padding:12px 20px;background:#0052d9;color:white;border:0;border-radius:6px}pre{white-space:pre-wrap;padding:20px;background:white;border:1px solid #ddd}</style>
+<h1>前端 → 后端 → PostgreSQL / Redis</h1><p>点击后将计数写入 PostgreSQL，再通过 Redis 读取。页面刷新后仍保留数据库计数。</p><button id="write">新增一次访问</button><pre id="result">正在读取…</pre>
+<script>async function run(method){const out=document.querySelector('#result');try{const r=await fetch('/api/visits',{method});if(!r.ok)throw Error(await r.text());out.textContent=JSON.stringify(await r.json(),null,2)}catch(e){out.textContent='服务暂不可用：'+e.message}}document.querySelector('#write').onclick=()=>run('POST');run('GET');</script></html>

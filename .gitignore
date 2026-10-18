@@ -1,0 +1,33 @@
+/target/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.agent-state/
+
+node_modules/
+apps/web/dist/
+playwright-report/
+test-results/
+
+__pycache__/
+*.pyc
+
+# Local synced references and OS/editor artifacts are not project source.
+/sources/
+/AGENTS.md
+.DS_Store
+*.swp
+.env.*
+!.env.example
+
+# Private runtime credentials, local state and editor configuration.
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+*.log
+/secrets/
+/.vscode/
+/.idea/

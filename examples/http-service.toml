@@ -1,0 +1,20 @@
+schema_version = 1
+image = "docker.io/nginxinc/nginx-unprivileged:stable-alpine"
+network = "bridge"
+
+[[ports]]
+host = 18080
+container = 8080
+
+[app]
+project = "demo"
+name = "web"
+
+[resources]
+memory_mib = 128
+cpu_millis = 500
+pids = 64
+
+# Requires working CNI bridge/portmap plugins. Only IPv4 loopback is published.
+# After applying on Linux: curl http://127.0.0.1:18080
+# No privileged port or additional capabilities are requested.

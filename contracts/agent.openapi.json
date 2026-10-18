@@ -1,0 +1,1512 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Deploy Platform local Agent API",
+    "version": "0.5.0",
+    "description": "HTTP/1.1 + JSON over a Unix Domain Socket only. Filesystem permissions grant full trusted node-management access. Default socket /run/deploy-platform/agent.sock; no TCP listener, token or remote transport. All integer IDs/timestamps should use 64-bit types in Go. New response fields may be added within v1; clients should ignore unknown fields. No automatic retry of mutations without a stable request_id."
+  },
+  "servers": [
+    {
+      "url": "http://localhost",
+      "description": "Logical HTTP origin; connect via the private Unix Socket instead of TCP."
+    }
+  ],
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "operationId": "health",
+        "description": "Worker availability; does not probe containerd or application health.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps": {
+      "get": {
+        "operationId": "applications",
+        "description": "Persisted application summaries; configuration values are omitted.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Application"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/operations": {
+      "get": {
+        "operationId": "operations",
+        "description": "Recent persisted apply operations, newest first.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Operation"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 20
+            },
+            "description": "Only this query parameter is supported."
+          }
+        ]
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "operationId": "job",
+        "description": "Read accepted job state and result. A failed job still returns HTTP 200.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v1/jobs": {
+      "post": {
+        "operationId": "submit",
+        "description": "Persist a mutation and return immediately. An identical normalized command with the same request_id returns the original job, including after restart. Jobs execute serially with recovery. Disconnecting does not cancel an accepted job. Runtime failures appear in Job.error, not in this HTTP status. Failed terminal jobs are not re-executed by resubmitting their key.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Submission"
+              },
+              "example": {
+                "request_id": "go-stop-demo-web-1",
+                "command": {
+                  "kind": "stop",
+                  "app": {
+                    "project": "demo",
+                    "name": "web"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted or existing job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Endpoint or resource missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key reused for a different command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type must be application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Pending job queue full; retry using the same request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal state or response limit failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker unavailable or API request deadline exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/secrets": {
+      "post": {
+        "operationId": "createSecret",
+        "description": "Write-only immutable secret; identical content retry succeeds, different content conflicts. Never enqueue this request. Same admin authentication as other endpoints.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Metadata only; no secret contents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/secrets/{project}": {
+      "get": {
+        "operationId": "listSecrets",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata only; no secret contents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/volumes/{project}/{name}": {
+      "get": {
+        "operationId": "listVolumes",
+        "description": "Retained volume metadata; no delete, host source path, or file-read endpoint.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata only; no secret contents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VolumeInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/diagnostics/{project}/{name}": {
+      "get": {
+        "operationId": "applicationDiagnostics",
+        "description": "On-demand owned container HTTP readiness snapshot.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Diagnostics"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/logs/{project}/{name}": {
+      "get": {
+        "operationId": "applicationLogs",
+        "description": "Bounded tail, no follow or host paths. Logs may contain app secrets.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "tail",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "LogSnapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ingress": {
+      "get": {
+        "operationId": "ingressSnapshot",
+        "responses": {
+          "200": {
+            "description": "IngressSnapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngressSnapshot"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "changeDomainBinding",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "RouteReceipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ingress/delete": {
+      "post": {
+        "operationId": "deleteDomainBinding",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteDelete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "RouteReceipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Identifier": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 48,
+        "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+      },
+      "AppKey": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Identifier"
+          }
+        },
+        "required": [
+          "project",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "Resources": {
+        "type": "object",
+        "properties": {
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 16,
+            "maximum": 4294967295
+          },
+          "cpu_millis": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "pids": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          }
+        },
+        "required": [
+          "memory_mib",
+          "cpu_millis",
+          "pids"
+        ],
+        "additionalProperties": false
+      },
+      "LocalPort": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 65535
+          },
+          "container": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "required": [
+          "host",
+          "container"
+        ],
+        "additionalProperties": false
+      },
+      "Intent": {
+        "type": "string",
+        "enum": [
+          "running",
+          "stopped"
+        ]
+      },
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "bad_request",
+              "not_found",
+              "conflict",
+              "queue_full",
+              "unavailable",
+              "internal"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "const": "v1"
+          },
+          "service_version": {
+            "type": "string"
+          },
+          "accepting": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "api_version",
+          "service_version",
+          "accepting"
+        ]
+      },
+      "Recovery": {
+        "type": "object",
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "next_attempt_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "running_since_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "attempts",
+          "next_attempt_ms",
+          "running_since_ms",
+          "error_code"
+        ]
+      },
+      "Application": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "$ref": "#/components/schemas/AppKey"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "instance_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "desired": {
+            "$ref": "#/components/schemas/Intent"
+          },
+          "recovery": {
+            "$ref": "#/components/schemas/Recovery"
+          }
+        },
+        "required": [
+          "app",
+          "fingerprint",
+          "phase",
+          "instance_id",
+          "desired",
+          "recovery"
+        ]
+      },
+      "Operation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "app": {
+            "$ref": "#/components/schemas/AppKey"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "app",
+          "phase",
+          "error_code"
+        ]
+      },
+      "JobResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "applied"
+              },
+              "operation_id": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "created": {
+                "type": "boolean"
+              },
+              "instance_id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "operation_id",
+              "created",
+              "instance_id",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "intent"
+              },
+              "app": {
+                "$ref": "#/components/schemas/AppKey"
+              },
+              "desired": {
+                "$ref": "#/components/schemas/Intent"
+              },
+              "outcome": {
+                "type": "string"
+              },
+              "next_attempt_ms": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "kind",
+              "app",
+              "desired",
+              "outcome",
+              "next_attempt_ms"
+            ]
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "state",
+          "result",
+          "error"
+        ]
+      },
+      "AppSpec": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "app": {
+            "$ref": "#/components/schemas/AppKey"
+          },
+          "image": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$",
+            "description": "Registry reference only. If @ is used, suffix must be sha256: followed by 64 hex digits."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/Resources"
+          },
+          "environment": {
+            "type": "object",
+            "maxProperties": 128,
+            "propertyNames": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 8192,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "default": {}
+          },
+          "args": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "type": "string",
+              "maxLength": 8192,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "default": []
+          },
+          "network": {
+            "type": "string",
+            "enum": [
+              "none",
+              "bridge",
+              "project"
+            ],
+            "default": "none"
+          },
+          "ports": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/LocalPort"
+            },
+            "default": []
+          },
+          "user": {
+            "$ref": "#/components/schemas/RunAs"
+          },
+          "volumes": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/VolumeMount"
+            }
+          },
+          "secrets": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/SecretMount"
+            }
+          },
+          "pull_policy": {
+            "type": "string",
+            "enum": [
+              "always",
+              "if_not_present",
+              "never"
+            ],
+            "default": "always",
+            "description": "never requires an already imported image; if_not_present prefers cached images."
+          },
+          "health_check": {
+            "$ref": "#/components/schemas/HttpHealthCheck"
+          }
+        },
+        "required": [
+          "schema_version",
+          "app",
+          "image",
+          "resources"
+        ],
+        "additionalProperties": false,
+        "description": "Immutable application configuration. Optional mounts/user preserve legacy fingerprints when absent. No host paths or secret bytes accepted; ordinary environment and args are not secret-safe.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "ports": {
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "ports"
+              ]
+            },
+            "then": {
+              "properties": {
+                "network": {
+                  "enum": [
+                    "bridge",
+                    "project"
+                  ]
+                }
+              },
+              "required": [
+                "network"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "health_check"
+              ]
+            },
+            "then": {
+              "properties": {
+                "network": {
+                  "const": "project"
+                }
+              },
+              "required": [
+                "network"
+              ]
+            }
+          }
+        ]
+      },
+      "Command": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "apply"
+              },
+              "spec": {
+                "$ref": "#/components/schemas/AppSpec"
+              },
+              "startup_wait_ms": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 30000
+              }
+            },
+            "required": [
+              "kind",
+              "spec",
+              "startup_wait_ms"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "start"
+              },
+              "app": {
+                "$ref": "#/components/schemas/AppKey"
+              }
+            },
+            "required": [
+              "kind",
+              "app"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "stop"
+              },
+              "app": {
+                "$ref": "#/components/schemas/AppKey"
+              }
+            },
+            "required": [
+              "kind",
+              "app"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "Submission": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "command": {
+            "$ref": "#/components/schemas/Command"
+          }
+        },
+        "required": [
+          "request_id",
+          "command"
+        ],
+        "additionalProperties": false
+      },
+      "RunAs": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "uid",
+          "gid"
+        ],
+        "properties": {
+          "uid": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "gid": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        }
+      },
+      "VolumeMount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "target"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "target": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Container-only canonical path under /data, /var/lib, /srv, /opt, /app, /workspace. No overlapping targets or host source paths."
+          },
+          "read_only": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "SecretMount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/Identifier"
+          }
+        },
+        "description": "Same-project immutable secret mounted read-only at /run/secrets/{name}. Contains no value."
+      },
+      "SecretInfo": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "name"
+        ],
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Identifier"
+          }
+        }
+      },
+      "SecretInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "name",
+          "value"
+        ],
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "value": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 1,
+            "description": "1..65536 UTF-8 bytes, no NUL. Never stored in jobs or returned; immutable same-content retries only."
+          }
+        }
+      },
+      "VolumeInfo": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "target",
+          "uid",
+          "gid"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "target": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer"
+          },
+          "gid": {
+            "type": "integer"
+          }
+        }
+      },
+      "HttpHealthCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "port",
+          "path"
+        ],
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^/(?!/)[A-Za-z0-9/._~-]*$"
+          }
+        },
+        "description": "Requires project network. Only owned container IP; no URL, proxy, credentials or redirects. 2s timeout; 2xx healthy."
+      },
+      "Diagnostics": {
+        "type": "object",
+        "required": [
+          "state",
+          "network",
+          "service_name",
+          "health",
+          "http_status",
+          "checked_at_ms"
+        ],
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "network": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "health": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "unhealthy",
+              "not_running",
+              "not_configured"
+            ]
+          },
+          "http_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "checked_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "LogSnapshot": {
+        "type": "object",
+        "required": [
+          "text",
+          "tail"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Plain text, control characters stripped. Application may log secrets. Max 64KiB raw combined streams."
+          },
+          "tail": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        }
+      },
+      "DomainName": {
+        "type": "string",
+        "minLength": 4,
+        "maxLength": 253,
+        "description": "Exact lowercase public ASCII DNS name, punycode accepted. No URL, IP, wildcard, private suffix or trailing dot."
+      },
+      "DomainRoute": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "domain",
+          "app",
+          "port"
+        ],
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/DomainName"
+          },
+          "app": {
+            "$ref": "#/components/schemas/AppKey"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "tls": {
+            "type": "string",
+            "enum": [
+              "production",
+              "staging"
+            ],
+            "default": "production"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "RouteChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "route",
+          "expected_revision"
+        ],
+        "properties": {
+          "route": {
+            "$ref": "#/components/schemas/DomainRoute"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "RouteDelete": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "domain",
+          "expected_revision"
+        ],
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/DomainName"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        }
+      },
+      "RouteReceipt": {
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        },
+        "description": "Durable desired-state acknowledgement, not proof of proxy/TLS readiness."
+      },
+      "RouteStatus": {
+        "type": "object",
+        "required": [
+          "route",
+          "revision",
+          "proxy_state",
+          "upstream_ready",
+          "checked_at_ms",
+          "error_code"
+        ],
+        "properties": {
+          "route": {
+            "$ref": "#/components/schemas/DomainRoute"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "proxy_state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "applied",
+              "failed"
+            ]
+          },
+          "upstream_ready": {
+            "type": "boolean"
+          },
+          "checked_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "IngressSnapshot": {
+        "type": "object",
+        "required": [
+          "routes",
+          "revision",
+          "applied_revision",
+          "checked_at_ms",
+          "error_code"
+        ],
+        "properties": {
+          "routes": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/RouteStatus"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "applied_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "checked_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CertificateStatus": {
+        "type": "object",
+        "required": [
+          "domain",
+          "state",
+          "trusted",
+          "not_after",
+          "issuer",
+          "checked_at_ms"
+        ],
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/DomainName"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "pending",
+              "staging",
+              "untrusted",
+              "hostname_mismatch",
+              "expired_or_not_yet_valid",
+              "invalid"
+            ]
+          },
+          "trusted": {
+            "type": "boolean"
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checked_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "description": "Served certificate metadata from fixed local 127.0.0.1:443 SNI probe; never exports keys."
+      }
+    }
+  },
+  "x-unix-socket": "/run/deploy-platform/agent.sock"
+}

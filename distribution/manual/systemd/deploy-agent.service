@@ -1,0 +1,28 @@
+[Unit]
+Description=Deploy Platform node recovery agent
+Wants=network-online.target containerd.service
+After=network-online.target containerd.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+StateDirectory=deploy-platform
+StateDirectoryMode=0700
+RuntimeDirectory=deploy-platform
+RuntimeDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/local/bin/agentd --nerdctl /usr/local/bin/nerdctl --address /run/containerd/containerd.sock --namespace deploy-platform --state-dir /var/lib/deploy-platform --socket /run/deploy-platform/agent.sock --poll-seconds 10
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+# agentd cancels active CLI work itself; runtime-created helpers may intentionally survive.
+# Application tasks belong to containerd, not the agent's lifetime.
+KillMode=process
+Nice=10
+CPUWeight=20
+MemoryHigh=192M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+FROM ubuntu:24.04
+ENV container=docker
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv dbus python3 ca-certificates curl iproute2 iptables kmod openssl util-linux && rm -rf /var/lib/apt/lists/*
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

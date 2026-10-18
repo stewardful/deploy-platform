@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "network": "project",
+  "ports": [],
+  "pull_policy": "if_not_present",
+  "app": {
+    "project": "fullstack",
+    "name": "redis"
+  },
+  "image": "docker.io/library/redis:7.4-bookworm",
+  "resources": {
+    "memory_mib": 256,
+    "cpu_millis": 500,
+    "pids": 128
+  },
+  "user": {
+    "uid": 999,
+    "gid": 999
+  },
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "redis-config"
+    }
+  ],
+  "args": [
+    "redis-server",
+    "/run/secrets/redis-config",
+    "--appendonly",
+    "yes",
+    "--appendfsync",
+    "everysec",
+    "--dir",
+    "/data",
+    "--maxmemory",
+    "128mb",
+    "--maxmemory-policy",
+    "noeviction"
+  ]
+}

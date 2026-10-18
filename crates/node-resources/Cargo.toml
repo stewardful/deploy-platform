@@ -1,0 +1,19 @@
+[package]
+name = "node-resources"
+description = "Private node-owned volumes and write-only project secrets, independent of HTTP/SQLite/nerdctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+[dependencies]
+app-model.workspace = true
+runtime-api.workspace = true
+agent-api.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+nix = { version = "0.30", features = ["fs", "user"] }
+[dev-dependencies]
+tempfile.workspace = true
+[lints]
+workspace = true

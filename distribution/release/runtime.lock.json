@@ -1,0 +1,14 @@
+{
+  "nerdctl": "2.4.1",
+  "containerd": "2.4.1",
+  "runc": "1.5.2",
+  "cni": "1.9.1",
+  "checksums_url": "https://github.com/containerd/nerdctl/releases/download/v2.4.1/SHA256SUMS",
+  "checksums_sha256": "f9e26b73ba2b1429614eb3061191381c300e24d08d82241e5fa044cfa77d34d9",
+  "archive_url_template": "https://github.com/containerd/nerdctl/releases/download/v2.4.1/nerdctl-full-2.4.1-linux-{arch}.tar.gz",
+  "source": "https://github.com/containerd/nerdctl/releases/tag/v2.4.1",
+  "archives": {
+    "amd64": "ff018f11ac2f1354bf7b3aaaca6e0b52d81139c746a89134744d0b7be3a0e62f",
+    "arm64": "2deffe14625f93866f90a8f265d0f59d6fa476c7dc54b98adb327b1b4613efd4"
+  }
+}

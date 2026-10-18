@@ -1,0 +1,47 @@
+name: Go control plane
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Check formatting
+        run: make go-format-check
+      - run: make go-vet
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Build real Agent API fixture and run Go race/integration tests
+        run: make go-integration
+      - run: make go-build
+  minimum-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/controlplane/go.mod
+          cache: false
+      - run: make go-test go-build
+  fullstack-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.9'
+          cache: false
+      - name: Check standalone demo module
+        env:
+          GOWORK: 'off'
+        run: |
+          go -C examples/fullstack/service vet ./...
+          CGO_ENABLED=0 GOOS=linux go -C examples/fullstack/service build -o /tmp/fullstack-demo .

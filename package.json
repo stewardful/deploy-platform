@@ -1,0 +1,26 @@
+{
+  "name": "deploy-platform",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/ts/control-client"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "web:dev": "npm run dev -w @deploy-platform/web",
+    "web:build": "npm run build -w @deploy-platform/web",
+    "typecheck": "npm run typecheck -w @deploy-platform/web",
+    "test": "vitest run",
+    "test:e2e": "node tests/web/run.mjs",
+    "format:check": "prettier --check \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/ts/**/*.ts\" \"tests/web/*.{ts,mjs}\" \"apps/web/vite.config.ts\" \"vitest.config.ts\" \"playwright.config.ts\"",
+    "format": "prettier --write \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/ts/**/*.ts\" \"tests/web/*.{ts,mjs}\" \"apps/web/vite.config.ts\" \"vitest.config.ts\" \"playwright.config.ts\""
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "prettier": "3.6.2",
+    "vitest": "^4.0.0"
+  },
+  "type": "module"
+}

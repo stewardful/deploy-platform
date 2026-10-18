@@ -1,0 +1,33 @@
+[package]
+name = "agent-api"
+description = "Agent wire contract with optional Unix HTTP client and server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+client = ["dep:bytes", "dep:hyper", "hyper/client", "dep:hyper-util", "dep:http-body-util", "dep:tokio"]
+server = ["dep:bytes", "dep:hyper", "hyper/server", "dep:hyper-util", "dep:http-body-util", "dep:tokio", "dep:tokio-util", "dep:nix"]
+
+[dependencies]
+ingress-model.workspace = true
+app-model.workspace = true
+runtime-api.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+bytes = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30", features = ["fs"], optional = true }
+
+[lints]
+workspace = true

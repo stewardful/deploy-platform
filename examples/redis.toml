@@ -1,0 +1,22 @@
+schema_version = 1
+image = "docker.io/library/redis:7.4-bookworm"
+network = "bridge"
+args = ["redis-server", "/run/secrets/redis-config", "--appendonly", "yes", "--appendfsync", "everysec", "--dir", "/data", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+[app]
+project = "demo"
+name = "redis"
+[resources]
+memory_mib = 256
+cpu_millis = 500
+pids = 128
+[user]
+uid = 999
+gid = 999
+[[ports]]
+host = 16379
+container = 6379
+[[volumes]]
+name = "data"
+target = "/data"
+[[secrets]]
+name = "redis-config"

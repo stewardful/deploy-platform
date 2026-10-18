@@ -1,0 +1,12 @@
+{
+  "request_id": "deploy-demo-web-v1",
+  "startup_wait_ms": 1000,
+  "spec": {
+    "schema_version": 1,
+    "app": { "project": "demo", "name": "web" },
+    "image": "docker.io/nginxinc/nginx-unprivileged:stable-alpine",
+    "resources": { "memory_mib": 128, "cpu_millis": 500, "pids": 64 },
+    "network": "bridge",
+    "ports": [{ "host": 18080, "container": 8080 }]
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "runtime-nerdctl"
+description = "Injectable nerdctl adapter with bounded process execution"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+app-model.workspace = true
+runtime-api.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+hyper = { workspace = true, features = ["client"] }
+hyper-util.workspace = true
+http-body-util.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30", features = ["signal", "process"] }
+
+[lints]
+workspace = true

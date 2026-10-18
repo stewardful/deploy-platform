@@ -1,0 +1,21 @@
+[package]
+name = "agent-core"
+description = "Deployment, recovery and serial job coordination over replaceable ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+agent-api.workspace = true
+app-model.workspace = true
+runtime-api.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true

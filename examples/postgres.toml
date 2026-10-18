@@ -1,0 +1,26 @@
+schema_version = 1
+image = "docker.io/library/postgres:17-bookworm"
+network = "bridge"
+args = ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=30"]
+[app]
+project = "demo"
+name = "db"
+[resources]
+memory_mib = 384
+cpu_millis = 500
+pids = 128
+[user]
+uid = 999
+gid = 999
+[environment]
+POSTGRES_PASSWORD_FILE = "/run/secrets/db-password"
+POSTGRES_DB = "app"
+PGDATA = "/var/lib/postgresql/data/pgdata"
+[[ports]]
+host = 15432
+container = 5432
+[[volumes]]
+name = "data"
+target = "/var/lib/postgresql/data"
+[[secrets]]
+name = "db-password"

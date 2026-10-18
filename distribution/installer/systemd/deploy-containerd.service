@@ -1,0 +1,26 @@
+[Unit]
+Description=Deploy Platform dedicated containerd
+After=network-online.target dbus.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=notify
+Environment=PATH=/opt/deploy-platform/current/runtime/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/deploy-platform/current/runtime/bin/containerd --config /etc/deploy-platform/containerd.toml
+RuntimeDirectory=deploy-platform-containerd
+RuntimeDirectoryMode=0700
+Delegate=yes
+KillMode=process
+Restart=on-failure
+RestartSec=5
+TasksMax=infinity
+LimitNOFILE=1048576
+OOMScoreAdjust=-500
+# Snapshot root directories must be searchable by the image's non-root user.
+# Runtime/state parent directories still restrict access to root.
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

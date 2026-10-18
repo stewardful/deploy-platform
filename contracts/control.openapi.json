@@ -1,0 +1,658 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Deploy Platform single-node control API",
+    "version": "0.5.0",
+    "description": "Go control API backed by the local Rust Agent Unix Socket. No control-plane database or automatic submission retry. 202 persists an Agent job, not application readiness. A failed terminal job is returned by GET with 200. Bearer token required on every route. Default listener is loopback only; no remote node transport or multi-user authorization."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8088"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./agent.openapi.json#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Control or Agent error; uncertain submissions retain original request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps": {
+      "get": {
+        "operationId": "applications",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "./agent.openapi.json#/components/schemas/Application"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Control or Agent error; uncertain submissions retain original request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps/apply": {
+      "post": {
+        "operationId": "apply",
+        "responses": {
+          "202": {
+            "description": "Accepted job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./agent.openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Control or Agent error; uncertain submissions retain original request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "get": {
+        "operationId": "job",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./agent.openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Control or Agent error; uncertain submissions retain original request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/operations": {
+      "get": {
+        "operationId": "operations",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "./agent.openapi.json#/components/schemas/Operation"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Control or Agent error; uncertain submissions retain original request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 20
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{project}/{name}/start": {
+      "post": {
+        "operationId": "start",
+        "responses": {
+          "202": {
+            "description": "Accepted job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./agent.openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Control or Agent error; uncertain submissions retain original request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "./agent.openapi.json#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "./agent.openapi.json#/components/schemas/Identifier"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{project}/{name}/stop": {
+      "post": {
+        "operationId": "stop",
+        "responses": {
+          "202": {
+            "description": "Accepted job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./agent.openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Control or Agent error; uncertain submissions retain original request_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "./agent.openapi.json#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "./agent.openapi.json#/components/schemas/Identifier"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/secrets": {
+      "post": {
+        "operationId": "createSecret",
+        "description": "Write-only immutable secret; identical content retry succeeds, different content conflicts. Never enqueue this request. Same admin authentication as other endpoints.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "agent.openapi.json#/components/schemas/SecretInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Metadata only; no secret contents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "agent.openapi.json#/components/schemas/SecretInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/secrets/{project}": {
+      "get": {
+        "operationId": "listSecrets",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata only; no secret contents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "agent.openapi.json#/components/schemas/SecretInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/volumes/{project}/{name}": {
+      "get": {
+        "operationId": "listVolumes",
+        "description": "Retained volume metadata; no delete, host source path, or file-read endpoint.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata only; no secret contents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "agent.openapi.json#/components/schemas/VolumeInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnostics/{project}/{name}": {
+      "get": {
+        "operationId": "applicationDiagnostics",
+        "description": "On-demand owned container HTTP readiness snapshot.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "agent.openapi.json#/components/schemas/Diagnostics"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/logs/{project}/{name}": {
+      "get": {
+        "operationId": "applicationLogs",
+        "description": "Bounded tail, no follow or host paths. Logs may contain app secrets.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "tail",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "LogSnapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "agent.openapi.json#/components/schemas/LogSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingress": {
+      "get": {
+        "operationId": "ingressSnapshot",
+        "responses": {
+          "200": {
+            "description": "IngressSnapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "agent.openapi.json#/components/schemas/IngressSnapshot"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "changeDomainBinding",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "agent.openapi.json#/components/schemas/RouteChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "RouteReceipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "agent.openapi.json#/components/schemas/RouteReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingress/delete": {
+      "post": {
+        "operationId": "deleteDomainBinding",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "agent.openapi.json#/components/schemas/RouteDelete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "RouteReceipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "agent.openapi.json#/components/schemas/RouteReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingress/certificate/{domain}": {
+      "get": {
+        "operationId": "servedCertificate",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "agent.openapi.json#/components/schemas/DomainName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CertificateStatus",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "agent.openapi.json#/components/schemas/CertificateStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "ApplyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "spec"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "spec": {
+            "$ref": "./agent.openapi.json#/components/schemas/AppSpec"
+          },
+          "startup_wait_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 100,
+            "maximum": 30000,
+            "default": 1000
+          }
+        }
+      },
+      "IntentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      }
+    }
+  }
+}

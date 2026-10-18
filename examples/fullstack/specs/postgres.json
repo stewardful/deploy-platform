@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "network": "project",
+  "ports": [],
+  "pull_policy": "if_not_present",
+  "app": {
+    "project": "fullstack",
+    "name": "postgres"
+  },
+  "image": "docker.io/library/postgres:17-bookworm",
+  "resources": {
+    "memory_mib": 384,
+    "cpu_millis": 500,
+    "pids": 128
+  },
+  "user": {
+    "uid": 999,
+    "gid": 999
+  },
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/lib/postgresql/data"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "db-password"
+    }
+  ],
+  "environment": {
+    "POSTGRES_DB": "app",
+    "PGDATA": "/var/lib/postgresql/data/pgdata",
+    "POSTGRES_PASSWORD_FILE": "/run/secrets/db-password"
+  },
+  "args": [
+    "postgres",
+    "-c",
+    "shared_buffers=64MB",
+    "-c",
+    "max_connections=30"
+  ]
+}

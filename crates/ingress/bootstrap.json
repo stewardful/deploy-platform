@@ -1,0 +1,1 @@
+{"admin":{"listen":"unix//run/deploy-platform-proxy/admin.sock","config":{"persist":false}},"logging":{"logs":{"default":{"level":"WARN"},"deploy_platform":{"level":"WARN","include":["deploy-platform-marker"],"writer":{"output":"stderr"}}}},"apps":{}}

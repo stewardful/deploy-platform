@@ -1,0 +1,16 @@
+schema_version = 1
+# Placeholder: replace with your own prebuilt AI API application image.
+image = "registry.example.com/team/ai-api:v1"
+
+[app]
+project = "assistant"
+name = "api"
+
+[resources]
+memory_mib = 256
+cpu_millis = 500
+pids = 64
+
+[environment]
+MODEL_NAME = "your-external-model"
+# API keys must not go here. Use a [[secrets]] name and make the image read /run/secrets/<name>; see docs/stateful.md.

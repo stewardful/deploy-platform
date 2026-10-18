@@ -1,0 +1,31 @@
+name: Web workspace
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  build-and-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - run: rustup toolchain install stable --profile minimal
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm test
+      - run: make web-build go-build
+      - run: cargo build --locked -p node-agent --example api_fixture
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-diagnostics
+          path: test-results/
+          retention-days: 3
