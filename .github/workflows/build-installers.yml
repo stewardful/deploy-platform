@@ -41,6 +41,13 @@ jobs:
       - run: make check test shellcheck workflow-check
       - run: npx playwright install --with-deps chromium
       - run: make web-e2e
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: installer-browser-diagnostics
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 3
   package:
     needs: [validate, test]
     strategy:
