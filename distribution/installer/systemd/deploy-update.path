@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for explicitly approved Deploy Platform upgrades
+
+[Path]
+PathExists=/var/lib/deploy-platform/updates/request.json
+Unit=deploy-update.service
+
+[Install]
+WantedBy=multi-user.target

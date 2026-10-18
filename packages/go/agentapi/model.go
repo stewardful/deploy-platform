@@ -426,3 +426,11 @@ func (r DomainRoute) Validate() error {
 	}
 	return r.App.Validate()
 }
+
+// Maintenance describes admission and accepted-work draining on one node.
+type Maintenance struct {
+	Draining      bool   `json:"draining"`
+	PendingJobs   uint32 `json:"pending_jobs"`
+	ActiveWriters uint32 `json:"active_writers"`
+	Quiescent     bool   `json:"quiescent"`
+}

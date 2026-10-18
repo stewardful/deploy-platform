@@ -100,6 +100,26 @@ func main() {
 			}
 			fmt.Fprint(w, "ready")
 		})
+		mux.HandleFunc("GET /api/upgrade-check", func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+			if check(ctx) != nil {
+				http.Error(w, "dependency unavailable", 503)
+				return
+			}
+			var count int64
+			if err := db.QueryRowContext(ctx, "SELECT count FROM visits WHERE id=1").Scan(&count); err != nil {
+				http.Error(w, "persisted record unavailable", 503)
+				return
+			}
+			cached, err := cache.Get(ctx, "visits").Result()
+			if err != nil {
+				http.Error(w, "persisted cache unavailable", 503)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"postgres": count, "redis": cached, "service": "backend"})
+		})
 		mux.HandleFunc("/api/visits", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != "GET" && r.Method != "POST" {
 				w.WriteHeader(405)

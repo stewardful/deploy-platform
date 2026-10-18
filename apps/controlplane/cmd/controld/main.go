@@ -17,6 +17,7 @@ import (
 	"deploy-platform.local/controlplane/config"
 	"deploy-platform.local/controlplane/control"
 	"deploy-platform.local/controlplane/httpapi"
+	"deploy-platform.local/controlplane/updates"
 	"deploy-platform.local/controlplane/webui"
 )
 
@@ -30,7 +31,18 @@ func run() error {
 		return err
 	}
 	defer client.Close()
-	handler, err := httpapi.New(control.New(client), cfg.Token)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var updater httpapi.Updater
+	if cfg.UpdatesDir != "" {
+		service, err := updates.New(cfg.UpdatesDir, cfg.ReleaseManifest, cfg.UpdatesConfig)
+		if err != nil {
+			return err
+		}
+		updater = service
+		go service.Run(ctx)
+	}
+	handler, err := httpapi.NewWithUpdates(control.New(client), cfg.Token, updater)
 	if err != nil {
 		return err
 	}
@@ -38,8 +50,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("cannot bind control listener: %w", err)

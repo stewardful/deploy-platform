@@ -174,4 +174,17 @@ func TestRealRustAgentIntegration(t *testing.T) {
 		}
 	}
 
+	drain := true
+	status, err := client.Maintenance(ctx, &drain)
+	if err != nil || !status.Draining {
+		t.Fatal("maintenance did not traverse Rust resource/ingress layers", err)
+	}
+	call("POST", "/api/v1/apps/demo/web/stop", `{"request_id":"blocked-during-upgrade"}`, 503, nil)
+	call("POST", "/api/v1/secrets", `{"project":"demo","name":"blocked","value":"test-only-value"}`, 503, nil)
+	call("GET", "/api/v1/apps", "", 200, &apps)
+	drain = false
+	if _, err := client.Maintenance(ctx, &drain); err != nil {
+		t.Fatal(err)
+	}
+
 }

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Deploy Platform single-node control API",
-    "version": "0.5.0",
-    "description": "Go control API backed by the local Rust Agent Unix Socket. No control-plane database or automatic submission retry. 202 persists an Agent job, not application readiness. A failed terminal job is returned by GET with 200. Bearer token required on every route. Default listener is loopback only; no remote node transport or multi-user authorization."
+    "version": "0.5.2",
+    "description": "Go control API backed by the local Rust Agent Unix Socket. No control-plane database or automatic submission retry. 202 persists an Agent job, not application readiness. A failed terminal job is returned by GET with 200. Bearer token required on every route. Default listener is loopback only; no remote node transport or multi-user authorization. Platform update endpoints discover stable GitHub releases and queue explicit systemd upgrades separately from Agent deployment jobs."
   },
   "servers": [
     {
@@ -575,6 +575,117 @@
           }
         }
       }
+    },
+    "/api/v1/updates": {
+      "get": {
+        "operationId": "platformUpdateStatus",
+        "responses": {
+          "200": {
+            "description": "Platform update status; accepted upgrade is not completed upgrade",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformUpdate"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer authentication required"
+          },
+          "409": {
+            "description": "Upgrade already pending or fresh version check required"
+          },
+          "503": {
+            "description": "Updates not configured"
+          }
+        }
+      }
+    },
+    "/api/v1/updates/check": {
+      "post": {
+        "operationId": "checkPlatformUpdates",
+        "responses": {
+          "202": {
+            "description": "Platform update status; accepted upgrade is not completed upgrade",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformUpdate"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer authentication required"
+          },
+          "409": {
+            "description": "Upgrade already pending or fresh version check required"
+          },
+          "503": {
+            "description": "Updates not configured"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/upgrade": {
+      "post": {
+        "operationId": "upgradePlatform",
+        "responses": {
+          "202": {
+            "description": "Platform update status; accepted upgrade is not completed upgrade",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformUpdate"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer authentication required"
+          },
+          "409": {
+            "description": "Upgrade already pending or fresh version check required"
+          },
+          "503": {
+            "description": "Updates not configured"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "version": {
+                    "type": "string",
+                    "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+                  }
+                },
+                "required": [
+                  "version"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -650,6 +761,97 @@
             "minLength": 1,
             "maxLength": 128,
             "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      },
+      "PlatformUpdate": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "current",
+          "candidate",
+          "checked_at",
+          "error",
+          "execution"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "current": {
+            "type": "string"
+          },
+          "candidate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "version",
+                  "asset_id",
+                  "size",
+                  "digest"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  },
+                  "asset_id": {
+                    "type": "integer"
+                  },
+                  "size": {
+                    "type": "integer"
+                  },
+                  "digest": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "checked_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "version",
+                  "phase",
+                  "message"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "checking",
+                      "downloading",
+                      "verifying",
+                      "installing",
+                      "succeeded",
+                      "failed",
+                      "interrupted"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
           }
         }
       }

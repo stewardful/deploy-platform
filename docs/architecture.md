@@ -71,3 +71,7 @@ Go webui 是独立静态适配器，公开登录页与构建资源；/api 前缀
 0.3 在 runtime-api 增加可选日志/诊断端口，runtime-nerdctl 的 network/diagnostics 模块承担归属验证与受限探测。agent-core::service 在不参与部署写入排序的只读路径最多并发两个诊断调用；领域配置与任务仍只由原 worker 写入。Go/TypeScript SDK 同步合约，Web 诊断关闭后停止轮询。完整边界及四服务示例见 [完整部署指南](fullstack.md)。
 
 当前通过 ingress-model、ingress 与其 caddy 模块 将域名策略、持久化协调和代理实现分离。Caddy 与安装器共享 ingress crate 提供的 bootstrap 模板；Go 证书检查只读取实际 TLS 元数据。参见 [域名与 HTTPS](ingress.md)。
+
+0.5.1 的升级协调使用 Agent 私有维护端口，三层共享 Rust 写入许可，不复制任务队列或绕过 Agent 写状态库。安装器在一致性副本上调用新 Agent 验证模型与迁移；受限只读业务/TLS 探针复用既有项目，不另起数据库或常驻检查服务。完整顺序与兼容性契约见 [升级保障](upgrade.md)。
+
+平台更新独立于业务部署任务：Go `updates` 检查 GitHub 并发布私有请求，systemd.path 按需启动安装执行器，使升级跨控制端重启继续；执行器只交付安装包，保护与回退仍由安装器负责。详见 [网页升级](updates.md)。

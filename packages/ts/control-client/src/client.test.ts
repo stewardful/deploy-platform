@@ -144,3 +144,29 @@ it('validates private mount boundaries and immutable stateful references', () =>
     }),
   ).not.toBeNull();
 });
+
+it('discovers and explicitly approves upgrades without passing URLs or commands', async () => {
+  const status = {
+    enabled: true,
+    current: '0.5.1',
+    candidate: null,
+    checked_at: '',
+    error: '',
+    execution: null,
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json(status, 200))
+    .mockResolvedValueOnce(json(status, 202))
+    .mockResolvedValueOnce(json(status, 202));
+  const client = new ControlClient('token', fetcher);
+  await client.updates();
+  await client.checkUpdates();
+  await client.upgrade('0.5.2');
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+    '/api/v1/updates',
+    '/api/v1/updates/check',
+    '/api/v1/updates/upgrade',
+  ]);
+  expect(fetcher.mock.calls[2][1]?.body).toBe('{"version":"0.5.2"}');
+});

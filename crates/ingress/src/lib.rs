@@ -57,6 +57,15 @@ impl Store {
         .map_err(|_| ApiError::internal())?;
         db.busy_timeout(Duration::from_millis(300))
             .map_err(|_| ApiError::internal())?;
+        let version: u32 = db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(|_| ApiError::internal())?;
+        if version != 0 {
+            return Err(ApiError::new(
+                ErrorCode::Unavailable,
+                "unsupported ingress schema",
+            ));
+        }
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS meta(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL); INSERT OR IGNORE INTO meta VALUES(1,0); CREATE TABLE IF NOT EXISTS routes(domain TEXT PRIMARY KEY,revision INTEGER NOT NULL,spec TEXT NOT NULL);").map_err(|_|ApiError::internal())?;
         Ok(Self { db })
     }
@@ -219,6 +228,16 @@ fn now() -> u64 {
 }
 #[async_trait]
 impl AgentApi for IngressService {
+    fn acquire_write(&self) -> agent_api::Result<agent_api::WritePermit> {
+        self.inner.acquire_write()
+    }
+    async fn maintenance(
+        &self,
+        draining: Option<bool>,
+    ) -> agent_api::Result<agent_api::Maintenance> {
+        self.inner.maintenance(draining).await
+    }
+
     async fn routes(&self) -> Result<IngressSnapshot> {
         let store = self.store.lock().map_err(|_| ApiError::internal())?;
         let revision = store.revision()?;
@@ -259,6 +278,7 @@ impl AgentApi for IngressService {
         })
     }
     async fn change_route(&self, change: RouteChange) -> Result<RouteReceipt> {
+        let _permit = self.acquire_write()?;
         change
             .route
             .validate()
@@ -284,6 +304,7 @@ impl AgentApi for IngressService {
         Ok(receipt)
     }
     async fn delete_route(&self, domain: DomainName, revision: i64) -> Result<RouteReceipt> {
+        let _permit = self.acquire_write()?;
         let _slot = self
             .mutation
             .try_acquire()
@@ -481,3 +502,14 @@ mod tests {
 
 #[cfg(all(unix, feature = "caddy"))]
 pub mod caddy;
+
+/// Offline schema and route validation for an installer-owned state copy.
+pub fn validate_state(path: &Path) -> Result<()> {
+    let store = Store::open(path)?;
+    for (_, route) in store.rows()? {
+        route
+            .validate()
+            .map_err(|_| ApiError::new(ErrorCode::BadRequest, "invalid persisted route"))?;
+    }
+    Ok(())
+}

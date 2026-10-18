@@ -16,3 +16,5 @@
 从仓库根执行 `make go-build go-test go-vet`；跨语言集成执行 `make go-integration`。
 
 [控制端操作指南](../../docs/controlplane.md) · [OpenAPI](../../contracts/control.openapi.json)
+
+安装部署时启用独立 `updates` 组件：后台检查 GitHub Release，管理 API 接受明确版本后写入私有队列；实际下载安装由独立 systemd 单元执行，控制端重启不会取消升级。开发模式默认关闭。见 [网页升级](../../docs/updates.md)。

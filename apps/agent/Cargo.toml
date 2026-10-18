@@ -32,6 +32,7 @@ agent-api = { workspace = true, features = ["client", "server"] }
 tokio-util.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 tempfile.workspace = true
 async-trait.workspace = true
 

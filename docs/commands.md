@@ -1,6 +1,6 @@
 # 统一命令入口
 
-一键安装 0.5.0 后，使用 `sudo cloudctl` 查看分类帮助。日常应用操作直接写子命令，不必先记住 `cloudctl agentctl ...`；原写法仍支持。
+一键安装 0.5.2 后，使用 `sudo cloudctl` 查看分类帮助。日常应用操作直接写子命令，不必先记住 `cloudctl agentctl ...`；原写法仍支持。
 
 ```bash
 sudo cloudctl help
@@ -54,3 +54,5 @@ agentctl --socket /run/deploy-platform/agent.sock apply -f app.json
 `validate/plan` 可以离线运行；其他命令需要常驻 agentd。`agentctl status` 是 doctor 的别名，与 cloudctl 的全节点 status 不同。独立模式的 nerdctl 路径/Socket/namespace 仍由 agentd 管理员参数配置，CLI 不自行打开数据库。
 
 服务安装方式见 [独立 Agent](agent.md)、[一键安装](install.md)。命令与网页使用同一个 Agent 写入者、持久化任务与部署实现；Go/Web 停止不会阻止 Agent 管理和恢复应用。
+
+升级维护命令为 `sudo cloudctl maintenance enter|status|exit`，状态区分门禁、待完成任务和 quiescent；升级流程中不要手动解除门禁。配置与恢复说明见 [升级保障](upgrade.md)。

@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
+import tempfile
 import subprocess
 
 FILES = [
@@ -13,24 +15,42 @@ FILES = [
     "/etc/deploy-platform/containerd.toml", "/etc/deploy-platform/nerdctl.toml",
     "/etc/deploy-platform/cni/10-cloud.conflist", "/opt/deploy-platform/nerdctl",
     "/etc/systemd/system/deploy-containerd.service", "/etc/systemd/system/deploy-agent.service", "/etc/systemd/system/deploy-control.service",
+    "/etc/systemd/system/deploy-update.service", "/etc/systemd/system/deploy-update.path",
     "/etc/sysctl.d/90-deploy-platform.conf", "/etc/modules-load.d/deploy-platform.conf"
 ]
 RECEIPT = "/etc/deploy-platform/install.json"
 TRANSACTION = "/var/lib/deploy-platform/install-transaction.json"
+BACKUP_ROOT = Path("/var/lib/deploy-platform/backups")
 UNITS = ("deploy-containerd.service", "deploy-proxy.service", "deploy-agent.service", "deploy-control.service")
+
+
+
+def write_record(path, value):
+    path = Path(path)
+    descriptor, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'w') as handle:
+            json.dump(value, handle, indent=2)
+            handle.write('\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(directory)
+        finally: os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def begin(destination, cidr):
     current = Path('/opt/deploy-platform/current')
     value = {"backup": destination, "cidr": cidr,
              "previous": str(current.readlink()) if current.is_symlink() else None,
+             "stage": "draining" if current.is_symlink() else "activating",
              "active": [u for u in UNITS if subprocess.run(['systemctl', 'is-active', '--quiet', u]).returncode == 0]}
     path = Path(TRANSACTION)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix('.tmp')
-    temp.write_text(json.dumps(value))
-    temp.chmod(0o600)
-    temp.replace(path)
+    write_record(path, value)
 
 
 def recover(source):
@@ -42,12 +62,30 @@ def recover(source):
     value = json.loads(path.read_text())
     backup = Path(value['backup'])
     previous = value['previous']
-    if backup.parent != Path('/var/lib/deploy-platform/backups') or not (backup / 'snapshot.json').is_file():
+    if backup.parent != BACKUP_ROOT or not (backup / 'snapshot.json').is_file():
         raise ValueError('invalid transaction backup')
     if previous and Path(previous).parent != Path('/opt/deploy-platform/releases'):
         raise ValueError('invalid previous release')
     if any(u not in UNITS for u in value['active']):
         raise ValueError('invalid transaction service')
+    if value.get('stage') == 'draining':
+        # No services/files have been changed yet. Never cancel an accepted job
+        # merely because draining or a pre-activation business check timed out.
+        from agent_http import request, AgentError
+        gated = Path('/run/deploy-platform/agent.sock.upgrade')
+        original = Path('/run/deploy-platform/agent.sock')
+        if gated.exists():
+            if original.exists() or not stat.S_ISSOCK(gated.lstat().st_mode):
+                raise ValueError('cannot restore legacy socket safely')
+            gated.rename(original)
+        else:
+            try: request('/v1/maintenance/exit', 'POST')
+            except AgentError as error:
+                if error.status != 404: raise
+        cleanup_upgrade()
+        path.unlink()
+        print('[cloud] drain aborted; old Agent resumed without cancelling deployments', flush=True)
+        return
     print('[cloud] recovering interrupted activation; database is never automatically downgraded', flush=True)
     for unit in reversed(UNITS[1:]):
         if subprocess.run(['systemctl', 'cat', unit], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
@@ -57,6 +95,14 @@ def recover(source):
         subprocess.run(['systemctl', 'disable', *UNITS], check=False)
     if not (backup / 'etc/systemd/system/deploy-proxy.service').exists():
         subprocess.run(['systemctl','disable','deploy-proxy.service'],check=False)
+    # A schema outside the old reader range must never be auto-downgraded.
+    baseline = backup / 'upgrade-baseline.json'
+    if baseline.exists():
+        import upgrade_state
+        policy = upgrade_state.private_json(baseline, max_bytes=8 * 1024**2)['rollback_contract']
+        if not upgrade_state.accepts(policy, upgrade_state.schema_versions()):
+            raise ValueError('rollback blocked: live schema is not readable by the old Agent; preserve backups and plan recovery')
+    cleanup_upgrade()
     restore(str(backup))
     current = Path('/opt/deploy-platform/current')
     for name in ('current.next', 'current.rollback'):
@@ -70,11 +116,38 @@ def recover(source):
         if current.is_symlink(): current.unlink()
         Path(RECEIPT).parent.mkdir(parents=True, exist_ok=True)
         receipt(source, value['cidr'], 'failed')
+    # A failed first installation of update support must leave no enabled watcher.
+    if not (backup / 'etc/systemd/system/deploy-update.path').exists():
+        subprocess.run(['systemctl', 'disable', '--now', 'deploy-update.path'], check=False)
     subprocess.run(['systemctl', 'daemon-reload'], check=True)
     for unit in value['active']:
         subprocess.run(['systemctl', 'reset-failed', unit], check=False)
         subprocess.run(['systemctl', 'start', unit], check=True)
     path.unlink()
+
+
+def activate_transaction():
+    path = Path(TRANSACTION)
+    value = json.loads(path.read_text())
+    value['stage'] = 'activating'
+    write_record(path, value)
+
+
+def cleanup_upgrade():
+    marker = Path('/var/lib/deploy-platform/upgrade-maintenance')
+    if marker.is_symlink():
+        raise ValueError('linked upgrade marker')
+    marker.unlink(missing_ok=True)
+    socket = Path('/run/deploy-platform/agent.sock.upgrade')
+    if socket.exists():
+        if not stat.S_ISSOCK(socket.lstat().st_mode):
+            raise ValueError('unexpected upgrade socket file')
+        socket.unlink()
+
+
+def commit():
+    Path(TRANSACTION).unlink(missing_ok=True)
+    cleanup_upgrade()
 
 
 def digest(path):
@@ -133,15 +206,12 @@ def receipt(source, cidr, phase):
     value = {"schema_version": 1, "owner": "deploy-platform", "version": manifest["version"], "arch": manifest["arch"],
              "manifest_sha256": digest(Path(source) / "manifest.json"), "runtime": manifest["runtime"], "bridge_cidr": cidr, "phase": phase,
              "managed_files": {name: digest(name) for name in FILES if Path(name).is_file()}}
-    temp = Path(RECEIPT + ".tmp")
-    temp.write_text(json.dumps(value, indent=2) + "\n")
-    temp.chmod(0o600)
-    temp.replace(RECEIPT)
+    write_record(RECEIPT, value)
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("action", choices=("check", "snapshot", "restore", "receipt", "begin", "recover", "commit"))
+    p.add_argument("action", choices=("check", "snapshot", "restore", "receipt", "begin", "recover", "commit", "activate"))
     p.add_argument("--destination")
     p.add_argument("--source")
     p.add_argument("--cidr")
@@ -151,6 +221,7 @@ if __name__ == "__main__":
     elif a.action == "snapshot": snapshot(a.destination)
     elif a.action == "restore": restore(a.destination)
     elif a.action == "begin": begin(a.destination, a.cidr)
+    elif a.action == "activate": activate_transaction()
     elif a.action == "recover": recover(a.source)
-    elif a.action == "commit": Path(TRANSACTION).unlink(missing_ok=True)
+    elif a.action == "commit": commit()
     else: receipt(a.source, a.cidr, a.phase)

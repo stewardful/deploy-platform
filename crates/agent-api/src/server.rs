@@ -177,6 +177,24 @@ fn error(error: ApiError) -> Reply {
 async fn route(request: Request<Incoming>, api: Arc<dyn AgentApi>) -> Reply {
     let path = request.uri().path().to_owned();
     match (request.method(), path.as_str()) {
+        (&Method::GET, "/v1/maintenance")
+        | (&Method::POST, "/v1/maintenance/enter" | "/v1/maintenance/exit") => {
+            if request.uri().query().is_some() {
+                return error(ApiError::new(
+                    ErrorCode::BadRequest,
+                    "unexpected maintenance query",
+                ));
+            }
+            let draining = match path.as_str() {
+                "/v1/maintenance/enter" => Some(true),
+                "/v1/maintenance/exit" => Some(false),
+                _ => None,
+            };
+            match api.maintenance(draining).await {
+                Ok(v) => json(StatusCode::OK, &v),
+                Err(e) => error(e),
+            }
+        }
         (&Method::GET, "/v1/ingress") => match api.routes().await {
             Ok(v) => json(StatusCode::OK, &v),
             Err(e) => error(e),

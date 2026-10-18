@@ -18,6 +18,7 @@ import {
   type AppSpec,
 } from '@deploy-platform/control-client';
 import AppList from './features/apps/AppList';
+import { PlatformUpdates } from './features/updates/PlatformUpdates';
 import TaskList from './features/jobs/TaskList';
 import { Modal } from './components/Modal';
 import { Login } from './components/Login';
@@ -190,6 +191,7 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
           </div>
         </header>
         <main className="page-content">
+          <PlatformUpdates client={client} onUnauthorized={onLogout} />
           <div className="page-heading">
             <div>
               <div className="eyebrow">PROJECT WORKSPACE</div>

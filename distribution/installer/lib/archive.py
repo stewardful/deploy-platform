@@ -82,6 +82,13 @@ def verify(directory, expected_arch=None):
     # Historical 0.1-0.3 bundles remain verifiable for installer rollback.
     if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,4,0):
         required.update({'proxy/bin/caddy','proxy/LICENSE','proxy/proxy.lock.json','systemd/deploy-proxy.service'})
+    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,5,1):
+        required.update({'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py'})
+        policy = manifest.get('compatibility')
+        if not isinstance(policy, dict) or policy.get('schema_version') != 1 or not isinstance(policy.get('state'), dict):
+            raise ValueError('release missing upgrade compatibility contract')
+    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,5,2):
+        required.update({'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path'})
     required.update("runtime/libexec/cni/" + name for name in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning"))
     if not required.issubset(actual):
         raise ValueError("release is missing application or runtime components")

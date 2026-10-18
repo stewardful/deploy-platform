@@ -9,7 +9,10 @@ use agent_api::{
 use async_trait::async_trait;
 use runtime_api::ContainerRuntime;
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use store_proxy::StoreProxy;
@@ -20,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 pub struct ServiceOptions {
     pub poll_interval: Duration,
     pub queue_capacity: u32,
+    pub start_drained: bool,
     pub recovery: RecoveryOptions,
 }
 impl Default for ServiceOptions {
@@ -27,11 +31,14 @@ impl Default for ServiceOptions {
         Self {
             poll_interval: Duration::from_secs(10),
             queue_capacity: 32,
+            start_drained: false,
             recovery: RecoveryOptions::default(),
         }
     }
 }
 struct Backend<S> {
+    writes: agent_api::WriteGate,
+    busy: AtomicBool,
     runtime: Arc<dyn ContainerRuntime>,
     diagnostics_slots: tokio::sync::Semaphore,
     store: Arc<Mutex<S>>,
@@ -75,6 +82,8 @@ impl<S: DeploymentStore + JobRepository + Send + 'static> Service<S> {
         store.recover_jobs()?;
         let runtime: Arc<dyn ContainerRuntime> = Arc::new(runtime);
         let backend = Arc::new(Backend {
+            writes: agent_api::WriteGate::default(),
+            busy: AtomicBool::new(false),
             runtime: runtime.clone(),
             diagnostics_slots: tokio::sync::Semaphore::new(2),
             store: Arc::new(Mutex::new(store)),
@@ -83,6 +92,7 @@ impl<S: DeploymentStore + JobRepository + Send + 'static> Service<S> {
             finished: CancellationToken::new(),
             capacity: options.queue_capacity,
         });
+        backend.writes.status(Some(options.start_drained))?;
         let worker_backend = backend.clone();
         let worker = std::thread::Builder::new()
             .name("agent-worker".into())
@@ -135,6 +145,26 @@ impl<S: Send + 'static> Backend<S> {
 
 #[async_trait]
 impl<S: DeploymentStore + JobRepository + Send + 'static> AgentApi for Backend<S> {
+    fn acquire_write(&self) -> agent_api::Result<agent_api::WritePermit> {
+        self.writes.acquire()
+    }
+    async fn maintenance(
+        &self,
+        draining: Option<bool>,
+    ) -> agent_api::Result<agent_api::Maintenance> {
+        let (draining, writers) = self.writes.status(draining)?;
+        self.wake.notify_one();
+        let pending = self.access(|s| s.pending_jobs()).await?;
+        Ok(agent_api::Maintenance {
+            draining,
+            pending_jobs: pending,
+            active_writers: writers,
+            quiescent: draining
+                && writers == 0
+                && pending == 0
+                && !self.busy.load(Ordering::SeqCst),
+        })
+    }
     async fn publication_target(
         &self,
         app: app_model::AppKey,
@@ -240,6 +270,7 @@ impl<S: DeploymentStore + JobRepository + Send + 'static> AgentApi for Backend<S
         .await
     }
     async fn submit(&self, submission: Submission) -> agent_api::Result<Job> {
+        let permit = self.acquire_write()?;
         if !self.accepting() {
             return Err(ApiError::new(
                 ErrorCode::Unavailable,
@@ -249,7 +280,10 @@ impl<S: DeploymentStore + JobRepository + Send + 'static> AgentApi for Backend<S
         submission.validate()?;
         let capacity = self.capacity;
         let job = self
-            .access(move |s| s.enqueue(&submission, capacity))
+            .access(move |s| {
+                let _permit = permit;
+                s.enqueue(&submission, capacity)
+            })
             .await?;
         self.wake.notify_one();
         Ok(job)
@@ -278,8 +312,17 @@ async fn worker_loop<R: ContainerRuntime, S: DeploymentStore + JobRepository + S
         .map_err(|_| ApiError::internal())?
         .pending_jobs()?;
     loop {
+        struct Busy<'a>(&'a AtomicBool);
+        impl Drop for Busy<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
         let step = async {
-            if startup_budget == 0 && Instant::now() >= next_recovery {
+            backend.busy.store(true, Ordering::SeqCst);
+            let busy = Busy(&backend.busy);
+            let draining = backend.writes.status(None)?.0;
+            if !draining && startup_budget == 0 && Instant::now() >= next_recovery {
                 let events = reconcile_once(&runtime, &mut store, &SystemClock, options.recovery)
                     .await
                     .map_err(|_| ApiError::internal())?;
@@ -308,7 +351,10 @@ async fn worker_loop<R: ContainerRuntime, S: DeploymentStore + JobRepository + S
                 return Ok::<_, ApiError>(());
             }
             startup_budget = 0;
-            if Instant::now() < next_recovery {
+            drop(busy);
+            if draining {
+                backend.wake.notified().await;
+            } else if Instant::now() < next_recovery {
                 tokio::select! { _ = backend.wake.notified() => {}, _ = tokio::time::sleep_until(next_recovery.into()) => {} }
             }
             Ok(())

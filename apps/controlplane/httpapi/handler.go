@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"deploy-platform.local/agentapi"
+	"deploy-platform.local/controlplane/updates"
 )
 
 type Manager interface {
@@ -57,12 +58,67 @@ type IntentRequest struct {
 	RequestID string `json:"request_id"`
 }
 
+type Updater interface {
+	Status() updates.Status
+	Check(context.Context) (updates.Status, error)
+	Upgrade(string) (updates.Status, error)
+}
+
 func New(manager Manager, token string) (http.Handler, error) {
+	return NewWithUpdates(manager, token, nil)
+}
+func NewWithUpdates(manager Manager, token string, updater Updater) (http.Handler, error) {
 	if manager == nil || len(token) < 32 || len(token) > 128 {
 		return nil, errors.New("manager and 32..128 byte token required")
 	}
 	expected := sha256.Sum256([]byte(token))
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/updates", func(w http.ResponseWriter, r *http.Request) {
+		if !method(w, r, http.MethodGet) {
+			return
+		}
+		if updater == nil {
+			write(w, 200, updates.Status{Enabled: false})
+			return
+		}
+		write(w, 200, updater.Status())
+	})
+	mux.HandleFunc("/api/v1/updates/check", func(w http.ResponseWriter, r *http.Request) {
+		if !method(w, r, http.MethodPost) {
+			return
+		}
+		var input struct{}
+		if !decode(w, r, &input) {
+			return
+		}
+		if updater == nil {
+			write(w, 503, Error{Code: "unavailable", Message: "updates disabled"})
+			return
+		}
+		value, _ := updater.Check(r.Context())
+		write(w, 202, value)
+	})
+	mux.HandleFunc("/api/v1/updates/upgrade", func(w http.ResponseWriter, r *http.Request) {
+		if !method(w, r, http.MethodPost) {
+			return
+		}
+		var input struct {
+			Version string `json:"version"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if updater == nil {
+			write(w, 503, Error{Code: "unavailable", Message: "updates disabled"})
+			return
+		}
+		value, err := updater.Upgrade(input.Version)
+		if err != nil {
+			write(w, 409, Error{Code: "conflict", Message: "upgrade pending or version check required"})
+			return
+		}
+		write(w, 202, value)
+	})
 	mux.HandleFunc("/api/v1/ingress", func(w http.ResponseWriter, r *http.Request) {
 		p, ok := manager.(IngressManager)
 		if !ok {

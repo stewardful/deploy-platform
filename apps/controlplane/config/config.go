@@ -15,11 +15,14 @@ import (
 )
 
 type Config struct {
-	WebDir       string
-	Listen       string
-	AgentSocket  string
-	AgentTimeout time.Duration
-	Token        string
+	UpdatesDir      string
+	ReleaseManifest string
+	UpdatesConfig   string
+	WebDir          string
+	Listen          string
+	AgentSocket     string
+	AgentTimeout    time.Duration
+	Token           string
 }
 
 func Load(args []string, output io.Writer) (Config, error) {
@@ -27,6 +30,9 @@ func Load(args []string, output io.Writer) (Config, error) {
 	var file string
 	fs := flag.NewFlagSet("controld", flag.ContinueOnError)
 	fs.SetOutput(output)
+	fs.StringVar(&c.UpdatesDir, "updates-dir", "", "private update spool; empty disables updates")
+	fs.StringVar(&c.ReleaseManifest, "release-manifest", "/opt/deploy-platform/current/manifest.json", "installed release manifest")
+	fs.StringVar(&c.UpdatesConfig, "updates-config", "/etc/deploy-platform/updates.json", "private GitHub repository and optional token file configuration")
 	fs.StringVar(&c.WebDir, "web-dir", "", "absolute prebuilt Web directory; empty enables API-only mode")
 	fs.StringVar(&c.Listen, "listen", "127.0.0.1:8088", "loopback IP:port only; use a secured tunnel for remote access")
 	fs.StringVar(&c.AgentSocket, "agent-socket", "/run/deploy-platform/agent.sock", "absolute local Agent Unix Socket path")
@@ -52,6 +58,9 @@ func Load(args []string, output io.Writer) (Config, error) {
 	}
 	if c.WebDir != "" && !filepath.IsAbs(c.WebDir) {
 		return c, errors.New("web directory must be absolute")
+	}
+	if c.UpdatesDir != "" && (!filepath.IsAbs(c.UpdatesDir) || !filepath.IsAbs(c.ReleaseManifest) || !filepath.IsAbs(c.UpdatesConfig)) {
+		return c, errors.New("update paths must be absolute")
 	}
 	token, err := readToken(file)
 	if err != nil {
