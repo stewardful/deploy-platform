@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "repository": "stewardful/deploy-delivery",
-  "commit": "495233cb91387f5438a7e37df6de25d374c9a554",
+  "commit": "cdd6bbfcdeaa1a406611e6ba2801523fc059a64a",
   "files": {
     "README.md": "a17296fb5f1bc0d6f692ca9bcbe1a5f50e6441abd9f6899789eba3a3fff50b90",
-    "scripts/artifact-request.py": "e519d37057e8b9b2cc80d8c81eb2e947c90900afaddd09eacaa50722fd08e21f",
+    "scripts/artifact-request.py": "44cc781733c55ed7a9ac70cefdae77b2c7cbe40e7d7da01e0b47169a74fb539e",
     "scripts/delivery.py": "16e437a988ef9d5e74e5ad165d512af55860900444b9fee2c3bca172078f502f",
-    "scripts/deploy-test.sh": "428595fbe6f9b34eb452e583f9192e7d7340591c2bd8a20d1c467264785218c4",
+    "scripts/deploy-test.sh": "79a9f6f833839df12fe4c35651b69f784b533f7150bf91d150005da3b346c87d",
     "scripts/os.sh": "b78cc22fbdd0807fc9243d0b0e99067a8a8550be36636fd4f07a953d4b9f20e6",
-    "scripts/remote-control.py": "d50057418106402c4d616596f5f9e66c9dc6256225a0b15c74ac962c2e2f3cf2",
-    "scripts/remote-install.py": "0bf830efc3cc7745d29f6f510f755057e321238216ebca5aae935f47829868c8",
+    "scripts/remote-control.py": "48d68a4994743edc669cc52db2100cbdffe508c001bd5ee8abbb8e315dc54b29",
+    "scripts/remote-install.py": "3f6e51a6795d700a9f759160be6f1bcc45f08810da767e6fe4a2ae0a9e0b1650",
     "tests/test_delivery.py": "b8930d895e6701fb4fd888a5310b300691e3edc897144f55da88c2190d834492",
-    "tests/test_remote.py": "bbe7bf563b15d60981e50e304ecd30d1a11c2b9495e53db8eed83bb2782dc68e"
+    "tests/test_remote.py": "bd35c4cef756152afa61062d6f13a8c29c88207b015135d688fc5ba84eadad3c"
   }
 }
