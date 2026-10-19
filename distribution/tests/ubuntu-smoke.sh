@@ -14,6 +14,14 @@ docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution
 cleanup() {
     local status=$?
     if (( status != 0 )); then
+        # Only this disposable node's smoke containers exist here. Retry start
+        # directly to expose the OCI error that the production API redacts.
+        docker exec "$NAME" /opt/deploy-platform/nerdctl ps --all || true
+        local instance
+        while IFS= read -r instance; do
+            [[ $instance =~ ^[a-f0-9]{12,64}$ ]] || continue
+            docker exec "$NAME" timeout 15 /opt/deploy-platform/nerdctl start -- "$instance" || true
+        done < <(docker exec "$NAME" /opt/deploy-platform/nerdctl ps --all --no-trunc --format '{{.ID}}' 2>/dev/null)
         docker exec "$NAME" journalctl -u deploy-proxy -u deploy-agent -u deploy-control -u deploy-containerd -n 100 --no-pager || true
     fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
