@@ -2,6 +2,8 @@
 # Disposable SSH target only; never contacts a user server or reads a real key.
 set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+UBUNTU_VERSION=${UBUNTU_VERSION:-24.04}
+[[ $UBUNTU_VERSION == 24.04 || $UBUNTU_VERSION == 26.04 ]] || { echo 'test Ubuntu must be 24.04 or 26.04' >&2; exit 2; }
 INSTALLER=${1:?absolute installer path with sibling .sha256}
 [[ $INSTALLER == /* && -f $INSTALLER ]]
 read -r RELEASE_VERSION TEST_SERVER_ARCH < <(python3 - "$INSTALLER" <<'PY'
@@ -21,10 +23,10 @@ cleanup() {
     rm -rf -- "$work"
 }
 trap cleanup EXIT
-docker build -f "$ROOT/distribution/tests/Dockerfile.ubuntu" -t cloud-upgrade-test:24.04 "$ROOT" >/dev/null
-docker build -f "$ROOT/distribution/tests/Dockerfile.ci-ssh" -t cloud-ci-ssh-test:24.04 "$ROOT" >/dev/null
+docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution/tests/Dockerfile.ubuntu" -t "cloud-upgrade-test:$UBUNTU_VERSION" "$ROOT" >/dev/null
+docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution/tests/Dockerfile.ci-ssh" -t "cloud-ci-ssh-test:$UBUNTU_VERSION" "$ROOT" >/dev/null
 docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2g --pids-limit=512 \
-    -p 127.0.0.1::22 --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=2g cloud-ci-ssh-test:24.04 >/dev/null
+    -p 127.0.0.1::22 --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=2g "cloud-ci-ssh-test:$UBUNTU_VERSION" >/dev/null
 ssh-keygen -q -t ed25519 -N '' -f "$work/key"
 docker exec "$NAME" mkdir -p -m 0700 /root/.ssh
 docker cp "$work/key.pub" "$NAME:/root/.ssh/authorized_keys" >/dev/null

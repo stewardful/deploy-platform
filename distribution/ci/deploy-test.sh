@@ -53,14 +53,27 @@ copy_host=$TEST_SERVER_HOST
 copy_destination=$TEST_SERVER_USER@$copy_host
 run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
 stage=/var/tmp/deploy-platform-ci-$run
-ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" bash -s -- "$run" <<'PREPARE'
+printf '%s\n' 'Checking server OS, architecture, systemd, cgroup and sudo before uploading installer'
+{
+cat "$ROOT/distribution/installer/lib/os.sh"
+cat <<'PREPARE'
 set -Eeuo pipefail
 umask 077
 command -v python3 >/dev/null
 command -v systemd-run >/dev/null
 sudo -n true
+check_supported_os
+case $(uname -m) in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; *) echo 'unsupported server architecture' >&2; exit 1;; esac
+[[ $arch == "$2" ]] || { echo "server architecture is $arch, installer architecture is $2" >&2; exit 1; }
+[[ -f /sys/fs/cgroup/cgroup.controllers && -d /run/systemd/system ]] || { echo 'systemd and cgroup v2 required' >&2; exit 1; }
+systemctl show-environment >/dev/null
+available=$(df -Pk /opt | awk 'NR==2 {print $4}')
+(( available >= 2097152 )) || { echo 'at least 2 GiB available disk required' >&2; exit 1; }
+printf 'PASS: supported OS and architecture %s; upload can begin\n' "$arch"
 mkdir -m 0700 -- "/var/tmp/deploy-platform-ci-$1"
 PREPARE
+} | ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" bash -s -- "$run" "$TEST_SERVER_ARCH"
+printf '%s\n' 'Uploading verified installer'
 scp "${options[@]}" -P "$TEST_SERVER_PORT" "$CI_ARTIFACT_DIR/$stem.run" "$copy_destination:$stage/installer.run"
 scp "${options[@]}" -P "$TEST_SERVER_PORT" "$work/SHA256SUMS" "$ROOT/distribution/ci/remote-install.py" "$copy_destination:$stage/"
 ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" bash -s -- "$run" "$GITHUB_SHA" <<'START'

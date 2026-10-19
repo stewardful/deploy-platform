@@ -6,6 +6,7 @@
 | --- | --- |
 | `bootstrap.sh.in` | `.run` 外壳，验证和解包，再进入安装脚本 |
 | `install.sh` | 参数、平台、安装顺序 |
+| `lib/os.sh` / `host.sh` | 共用 Ubuntu 版本策略与主机能力检查，CI 在传包前验证 |
 | `lib/archive.py` | 安全解压与完整清单/摘要校验 |
 | `lib/network.py` / `configure.py` | 网段选择、专属运行时与代理配置 |
 | `lib/upgrade_state.py` | 兼容性、SQLite/资源状态、一致性副本预演 |

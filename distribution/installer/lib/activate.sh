@@ -21,7 +21,9 @@ rollback() {
 }
 activate() {
     local destination=/opt/deploy-platform/releases/$RELEASE_ID unit generated=$WORK/generated
-    install -d -m 0755 /opt/deploy-platform/releases
+    # Explicitly set both directories: implicit parent modes may honor umask 077.
+    # Only immutable release assets live here; secrets and state stay private.
+    install -d -m 0755 /opt/deploy-platform /opt/deploy-platform/releases
     if [[ -e $destination ]]; then
         python3 "$SOURCE/lib/archive.py" verify "$destination" --arch "$HOST_ARCH" >/dev/null
     else

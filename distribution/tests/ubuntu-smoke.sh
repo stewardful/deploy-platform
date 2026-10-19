@@ -3,13 +3,22 @@
 # All node changes occur inside a disposable test container, never the build host.
 set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+UBUNTU_VERSION=${UBUNTU_VERSION:-24.04}
+[[ $UBUNTU_VERSION == 24.04 || $UBUNTU_VERSION == 26.04 ]] || { echo 'test Ubuntu must be 24.04 or 26.04' >&2; exit 2; }
 STATEFUL=${STATEFUL:-0}
 INSTALLER=${1:?pass an absolute .run installer path matching the Docker host architecture}
 [[ $INSTALLER == /* && -f $INSTALLER ]] || exit 2
 NAME=cloud-installer-test-$$
-IMAGE=cloud-installer-test:24.04
-docker build -f "$ROOT/distribution/tests/Dockerfile.ubuntu" -t "$IMAGE" "$ROOT"
-trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
+IMAGE=cloud-installer-test:$UBUNTU_VERSION
+docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution/tests/Dockerfile.ubuntu" -t "$IMAGE" "$ROOT"
+cleanup() {
+    local status=$?
+    if (( status != 0 )); then
+        docker exec "$NAME" journalctl -u deploy-proxy -u deploy-agent -u deploy-control -u deploy-containerd -n 100 --no-pager || true
+    fi
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 # Separate exec-enabled storage avoids overlay-on-overlay limitations in nested tests.
 docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2g --pids-limit=512 \
     --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=1g "$IMAGE" >/dev/null

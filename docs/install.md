@@ -1,20 +1,20 @@
 # 腾讯云 Ubuntu 一键安装
 
-第一版面向 **Ubuntu 24.04 LTS、systemd、cgroup v2、2 核 2 GiB**，支持 amd64 / arm64。目标节点安装预编译产物，Web 由 Go 控制端直接提供，不需要 Node、Go、Rust、Docker 或 Compose。Agent、控制端与运行时分别使用 systemd，默认开机启动。
+第一版面向 **Ubuntu 24.04 / 26.04 LTS、systemd、cgroup v2、2 核 2 GiB**，支持 amd64 / arm64。目标节点安装预编译产物，Web 由 Go 控制端直接提供，不需要 Node、Go、Rust、Docker 或 Compose。Agent、控制端与运行时分别使用 systemd，默认开机启动。
 
 ## 安装和打开网页
 
 在可信构建机生成安装包，或从自己的 CI 下载对应架构产物。服务器 `uname -m` 为 `x86_64` 选 `amd64`，为 `aarch64` 选 `arm64`。建议为镜像和版本备份留至少 10 GiB 可用磁盘；安装器最低检查 2 GiB。镜像仓库和 Ubuntu 软件源需要能访问。包已包含运行时，首次部署仍要拉取应用镜像。
 
-把 `deploy-platform-0.5.2-linux-amd64.run` 和同名 `.sha256` 上传服务器。下面以 amd64 为例，ARM 服务器替换文件名中的架构：
+把 `deploy-platform-0.5.3-linux-amd64.run` 和同名 `.sha256` 上传服务器。下面以 amd64 为例，ARM 服务器替换文件名中的架构：
 
 ```bash
 # 在上传目录，检查可信来源提供的摘要；只上传 .run 时使用下面的完整性自检
-sha256sum --check --ignore-missing deploy-platform-0.5.2-linux-amd64.sha256
-bash deploy-platform-0.5.2-linux-amd64.run --check
+sha256sum --check --ignore-missing deploy-platform-0.5.3-linux-amd64.sha256
+bash deploy-platform-0.5.3-linux-amd64.run --check
 
 # 一条命令安装 Web、控制端、Agent、独立 containerd / nerdctl / runc / CNI
-sudo bash deploy-platform-0.5.2-linux-amd64.run
+sudo bash deploy-platform-0.5.3-linux-amd64.run
 
 sudo cloudctl status
 sudo cloudctl token
@@ -139,9 +139,11 @@ tests/installer/           纯 Python 组件回归测试
 
 ```bash
 make installer-test
-VERSION=0.5.2 make release-build
+VERSION=0.5.3 make release-build
 ```
 
 生成 `target/dist/*.run`、`.tar.gz`、`.sha256`。`package.py` 也可以接收已构建的 `--bin-dir`、`--web-dir` 和 `--runtime-archive`，会检查 ELF 架构和每个文件的摘要。`Dockerfile.agent` 可从其他系统构建 Linux Agent，Go 可交叉编译，Web 产物与架构无关。
 
 推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送通过 SSH 自动更新指定测试机，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
+
+Ubuntu 26.04 的适配与本地安装、升级验收入口见 [Ubuntu 兼容性验证](ubuntu-compatibility.md)。

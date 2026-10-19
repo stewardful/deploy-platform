@@ -5,7 +5,7 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 [[ $(uname -s) == Linux ]] || { echo 'Build on Linux (or use Dockerfile.agent for Agent binaries)' >&2; exit 1; }
 case $(uname -m) in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; *) exit 1;; esac
-VERSION=${VERSION:-0.5.2}
+VERSION=${VERSION:-0.5.3}
 CACHE=${RELEASE_CACHE:-$ROOT/target/release-cache}
 mkdir -p "$CACHE" "$ROOT/target/release-bin/$ARCH"
 URL=$(python3 - "$ARCH" <<'PY'

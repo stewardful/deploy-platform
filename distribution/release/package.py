@@ -125,6 +125,7 @@ def package(args):
             for p in sorted(stage.rglob("*")):
                 handle.add(p, arcname=p.relative_to(stage).as_posix(), recursive=False)
         header = (ROOT / "distribution/installer/bootstrap.sh.in").read_text()
+        header = header.replace("@OS_POLICY@", (ROOT / "distribution/installer/lib/os.sh").read_text())
         header = header.replace("@PAYLOAD_SHA256@", archive.digest(payload)).replace("@ARCHIVE_HELPER@", (ROOT / "distribution/installer/lib/archive.py").read_text())
         runner = output / (stem + ".run")
         with open(runner, "wb") as target, open(payload, "rb") as source:
@@ -138,7 +139,7 @@ def package(args):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--arch", choices=("amd64", "arm64"), required=True)
-    p.add_argument("--version", default="0.5.2")
+    p.add_argument("--version", default="0.5.3")
     p.add_argument("--bin-dir", required=True)
     p.add_argument("--web-dir", default=str(ROOT / "apps/web/dist"))
     p.add_argument("--runtime-archive", required=True)

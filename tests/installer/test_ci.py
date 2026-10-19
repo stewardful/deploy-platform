@@ -126,6 +126,9 @@ if os.path.basename(sys.argv[0])=='ssh':
     if 'cat' in sys.argv:print('{"phase":"succeeded"}')
     elif 'bash' in sys.argv:
         script=sys.stdin.read()
+        if 'check_supported_os' in script:
+            open(os.environ['CI_TEST_TRACE']+'.preflight','w').write(script)
+            if os.environ.get('CI_TEST_REJECT_HOST')=='1':sys.exit(42)
         if 'systemd-run' in script:open(os.environ['CI_TEST_START'],'w').write(script)
 '''
             for name in ('ssh','scp','ssh-keygen'):
@@ -143,3 +146,13 @@ if os.path.basename(sys.argv[0])=='ssh':
                     self.assertIn('StrictHostKeyChecking=yes',args)
                     self.assertIn('IdentitiesOnly=yes',args)
             self.assertNotIn('test-only',trace.read_text()+result.stdout+result.stderr)
+            preflight=Path(str(trace)+'.preflight').read_text()
+            self.assertIn('check_supported_os',preflight)
+            self.assertIn('server architecture',preflight)
+            self.assertIn('cgroup.controllers',preflight)
+            # A rejected host must never receive or execute a package.
+            trace.unlink();start.unlink()
+            rejected=subprocess.run(['bash',str(ROOT/'distribution/ci/deploy-test.sh')],env=dict(env,CI_TEST_REJECT_HOST='1'),capture_output=True,text=True)
+            self.assertEqual(rejected.returncode,42,rejected.stderr)
+            self.assertFalse(start.exists())
+            self.assertTrue(all(json.loads(line)[0]!='scp' for line in trace.read_text().splitlines()))

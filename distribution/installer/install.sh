@@ -58,7 +58,7 @@ WORK=$(mktemp -d /var/tmp/cloud-install.XXXXXXXX)
 trap 'rm -rf -- "$WORK"' EXIT
 args=(); [[ -z $CIDR ]] || args=(--requested "$CIDR")
 CIDR=$(ip -j -4 route show table all | python3 "$SOURCE/lib/network.py" "${args[@]}")
-log "Ubuntu 24.04 / $HOST_ARCH; dedicated bridge $CIDR; installing prebuilt release $VERSION"
+log "Ubuntu $HOST_VERSION / $HOST_ARCH; dedicated bridge $CIDR; installing prebuilt release $VERSION"
 # shellcheck source=lib/activate.sh
 source "$SOURCE/lib/activate.sh"
 activate

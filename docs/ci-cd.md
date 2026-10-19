@@ -47,7 +47,7 @@ ssh-keygen -lf test_known_hosts
 
 ## 测试服务器准备
 
-服务器使用 Ubuntu 24.04/systemd，确认架构、磁盘和端口满足 [安装指南](install.md)。SSH 用户需要 `sudo -n true` 成功，并能无交互执行安装所需的 root 管理命令；root 登录也需要服务器安装 sudo。确保 Python 3、sudo 和 systemd-run 可用，部署公钥已加入该用户的 authorized_keys。
+服务器使用 Ubuntu 24.04 或 26.04 LTS/systemd，确认架构、磁盘和端口满足 [安装指南](install.md)。SSH 用户需要 `sudo -n true` 成功，并能无交互执行安装所需的 root 管理命令；root 登录也需要服务器安装 sudo。确保 Python 3、sudo 和 systemd-run 可用，部署公钥已加入该用户的 authorized_keys。
 
 首次部署可自动调用安装器安装依赖；已有平台时使用 `--upgrade --skip-apt`。运行项目须按 [升级保障](upgrade.md) 配置 `/etc/deploy-platform/upgrade-checks.json`，缺少探针、schema/运行时不兼容、任务未排空或验证失败都使 Actions 失败，保护规则不会因 dev 环境而跳过。
 

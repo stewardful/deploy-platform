@@ -14,3 +14,21 @@ jobs:
     uses: ./.github/workflows/build-installers.yml
     with:
       arch: amd64
+  ubuntu-install:
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['24.04', '26.04']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          name: deploy-platform-linux-amd64
+          path: dist
+      - name: Install and exercise real containers on an isolated 2CPU/2GiB node
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: bash distribution/tests/ubuntu-smoke.sh "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run
