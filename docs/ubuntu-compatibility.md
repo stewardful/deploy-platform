@@ -23,7 +23,7 @@ UBUNTU_VERSION=26.04 bash distribution/tests/upgrade-smoke.sh /ABS/deploy-platfo
 # 24.04 上真实历史版本到新版的升级
 UBUNTU_VERSION=24.04 bash distribution/tests/upgrade-smoke.sh /ABS/deploy-platform-0.5.2-linux-arm64.run /ABS/deploy-platform-0.5.3-linux-arm64.run /ABS/upgrade-demo.tar
 
-# SSH 预检、主机密钥拒绝、首次安装和断线升级；安装包旁需有 .sha256
+# SSH 预检、HTTPS 地址刷新/续传、首次安装和断线升级；安装包旁需有 .sha256
 UBUNTU_VERSION=26.04 bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-0.5.3-linux-arm64.run
 ```
 

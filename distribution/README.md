@@ -5,6 +5,7 @@
 | 目录 | 使用场景 | 入口 |
 | --- | --- | --- |
 | `release/` | 开发机/CI 构建与打包 | `build.sh`、`package.py`、运行时/代理锁定清单 |
+| `ci/` | GitHub 交付编排、SSH 控制、HTTPS 下载 | `artifact-request.py`、`deploy-test.sh`、`remote-control.py`、`remote-install.py`、`delivery.py` |
 | `installer/` | `.run` 在 Ubuntu 上的安装、升级与自检 | `bootstrap.sh.in`、`install.sh`、`cloudctl` |
 | `installer/systemd/` | 一键安装器的专属运行时与服务 | containerd、Agent、Go/Web、Caddy 四个 unit |
 | [manual](manual/README.md) | 已有运行时的手动集成 | `manual/systemd/`，仅 Agent 和控制端 |

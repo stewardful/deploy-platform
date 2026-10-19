@@ -6,6 +6,10 @@ on:
         description: amd64, arm64 or both
         type: string
         default: both
+      delivery:
+        description: Upload only the installer and checksums for server HTTPS delivery
+        type: boolean
+        default: false
     outputs:
       version:
         value: ${{ jobs.validate.outputs.version }}
@@ -75,8 +79,19 @@ jobs:
           cd target/dist
           sha256sum -c ./*.sha256
       - uses: actions/upload-artifact@v6
+        if: ${{ !inputs.delivery }}
         with:
           name: deploy-platform-linux-${{ matrix.arch }}
           path: target/dist/*
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@v6
+        if: inputs.delivery
+        with:
+          name: deploy-platform-linux-${{ matrix.arch }}
+          path: |
+            target/dist/*.run
+            target/dist/*.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3

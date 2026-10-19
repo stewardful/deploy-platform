@@ -31,29 +31,15 @@ printf '%s\n' "$TEST_SSH_KNOWN_HOSTS" | tr -d '\r' > "$work/known_hosts"
 unset TEST_SSH_PRIVATE_KEY TEST_SSH_KNOWN_HOSTS
 ssh-keygen -y -P '' -f "$work/key" >/dev/null
 ssh-keygen -l -f "$work/known_hosts" >/dev/null
-stem=deploy-platform-$RELEASE_VERSION-linux-$TEST_SERVER_ARCH
-python3 - "$CI_ARTIFACT_DIR/$stem.run" "$CI_ARTIFACT_DIR/$stem.sha256" "$work/SHA256SUMS" <<'PY'
-import hashlib, re, sys
-from pathlib import Path
-installer, checksum, output = map(Path, sys.argv[1:])
-if installer.is_symlink() or not installer.is_file(): raise SystemExit('installer missing or linked')
-digest=hashlib.sha256()
-with installer.open('rb') as handle:
-    for chunk in iter(lambda: handle.read(256*1024),b''): digest.update(chunk)
-actual=digest.hexdigest()
-lines=checksum.read_text().splitlines()
-expected=[line.split('  ',1)[0] for line in lines if re.fullmatch(r'[a-f0-9]{64}  '+re.escape(installer.name),line)]
-if expected!=[actual]: raise SystemExit('CI artifact checksum mismatch')
-output.write_text(actual+'  installer.run\n')
-PY
-options=(-i "$work/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$work/known_hosts" -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+export CI_ARTIFACT_DIR TEST_SERVER_ARCH
+# This metadata file has no credentials. URL issuance happens only after host preflight.
+python3 "$ROOT/distribution/ci/artifact-request.py" prepare "$work/request.json"
+options=(-F /dev/null -i "$work/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$work/known_hosts" -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
 destination=$TEST_SERVER_USER@$TEST_SERVER_HOST
-copy_host=$TEST_SERVER_HOST
-[[ $copy_host != *:* ]] || copy_host="[$copy_host]"
-copy_destination=$TEST_SERVER_USER@$copy_host
+ssh_control() { env -u GH_TOKEN -u GITHUB_TOKEN ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" "$@"; }
 run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
 stage=/var/tmp/deploy-platform-ci-$run
-printf '%s\n' 'Checking server OS, architecture, systemd, cgroup and sudo before uploading installer'
+printf '%s\n' 'Checking server OS, architecture, systemd, cgroup and sudo before HTTPS delivery'
 {
 cat "$ROOT/distribution/installer/lib/os.sh"
 cat <<'PREPARE'
@@ -69,33 +55,43 @@ case $(uname -m) in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; *) echo 'un
 systemctl show-environment >/dev/null
 available=$(df -Pk /opt | awk 'NR==2 {print $4}')
 (( available >= 2097152 )) || { echo 'at least 2 GiB available disk required' >&2; exit 1; }
-printf 'PASS: supported OS and architecture %s; upload can begin\n' "$arch"
-mkdir -m 0700 -- "/var/tmp/deploy-platform-ci-$1"
+printf 'PASS: supported OS and architecture %s; HTTPS download can begin\n' "$arch"
+: # The root control entry point creates its own private stage after validation.
 PREPARE
-} | ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" bash -s -- "$run" "$TEST_SERVER_ARCH"
-printf '%s\n' 'Uploading verified installer'
-scp "${options[@]}" -P "$TEST_SERVER_PORT" "$CI_ARTIFACT_DIR/$stem.run" "$copy_destination:$stage/installer.run"
-scp "${options[@]}" -P "$TEST_SERVER_PORT" "$work/SHA256SUMS" "$ROOT/distribution/ci/remote-install.py" "$copy_destination:$stage/"
-ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" bash -s -- "$run" "$GITHUB_SHA" <<'START'
-set -Eeuo pipefail
-stage=/var/tmp/deploy-platform-ci-$1
-# Hand off to a root-owned directory before the independent root service opens files.
-sudo -n chown -R root:root "$stage"
-sudo -n chmod -R go-rwx "$stage"
-sudo -n systemd-run --no-block --unit="deploy-platform-ci-$1" --property=Type=oneshot --property=TimeoutStartSec=infinity --property=UMask=0077 --property=Nice=10 --property=MemoryHigh=256M /usr/bin/python3 "$stage/remote-install.py" "$2"
-START
+} | ssh_control bash -s -- "$run" "$TEST_SERVER_ARCH"
+control_command=$(python3 - "$ROOT/distribution/ci/remote-control.py" <<'PYCONTROL'
+from pathlib import Path
+import shlex,sys
+print('sudo -n python3 -c '+shlex.quote(Path(sys.argv[1]).read_text()))
+PYCONTROL
+)
+# The bootstrap contains only small control metadata and downloader source, never installer bytes.
+python3 "$ROOT/distribution/ci/artifact-request.py" authorize "$work/request.json" > "$work/control.json"
+ssh_control "$control_command start" < "$work/control.json"
+rm -f "$work/control.json"
+last_progress='' revision=1
 end=$((SECONDS + 10#$DEPLOY_WAIT_SECONDS))
 while (( SECONDS < end )); do
-    if status=$(ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" sudo -n cat "$stage/result.json" 2>/dev/null); then
+    if status=$(ssh_control sudo -n cat "$stage/result.json" 2>/dev/null); then
         phase=$(printf '%s' "$status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["phase"])')
+        progress=$(printf '%s' "$status" | python3 -c 'import json,sys; s=json.load(sys.stdin); print(s["phase"], str(s.get("downloaded_bytes",0))+"/"+str(s.get("total_bytes",0))+" bytes",s.get("error_code",""))')
+        if [[ $progress != "$last_progress" ]]; then printf '%s\n' "$progress"; last_progress=$progress; fi
         case $phase in
+            awaiting_url)
+                requested=$(printf '%s' "$status" | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["url_revision"]))')
+                if (( requested < revision )); then sleep 1; continue; fi
+                revision=$((requested+1))
+                if (( revision > 4 )); then echo 'Download authorization refresh limit exceeded; inspect remote result' >&2; exit 1; fi
+                URL_REVISION=$revision python3 "$ROOT/distribution/ci/artifact-request.py" authorize "$work/request.json" > "$work/control.json"
+                ssh_control "$control_command refresh" < "$work/control.json"
+                rm -f "$work/control.json";;
             succeeded)
                 printf '%s\n' 'PASS: test server installer committed and application verification passed'
                 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then printf 'Test deployment succeeded: %s (run %s)\n' "$GITHUB_SHA" "$run" >> "$GITHUB_STEP_SUMMARY"; fi
                 exit 0;;
             failed)
                 printf '%s\n' 'Test deployment failed; private installer log follows.' >&2
-                ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" sudo -n tail -n 100 "$stage/install.log" || true
+                ssh_control sudo -n tail -n 100 "$stage/install.log" || true
                 exit 1;;
         esac
     fi

@@ -14,7 +14,12 @@ jobs:
     uses: ./.github/workflows/build-installers.yml
     with:
       arch: amd64
+      delivery: true
   ubuntu-install:
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     if: github.event_name == 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
@@ -28,7 +33,20 @@ jobs:
         with:
           name: deploy-platform-linux-amd64
           path: dist
+      - name: Verify actual GitHub archive digest, size and extraction contract
+        if: matrix.ubuntu == '26.04'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_ARTIFACT_DIR: ${{ github.workspace }}/dist
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          CI_ARTIFACT_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: python3 distribution/tests/check-artifact.py
       - name: Install and exercise real containers on an isolated 2CPU/2GiB node
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}
         run: bash distribution/tests/ubuntu-smoke.sh "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run
+      - name: Exercise real SSH control and HTTPS delivery faults
+        if: matrix.ubuntu == '26.04'
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: bash distribution/tests/ci-ssh-smoke.sh "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run

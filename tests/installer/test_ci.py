@@ -114,45 +114,55 @@ class SSHTransportTests(unittest.TestCase):
         self.assertIn('invalid TEST_SERVER_HOST',result.stderr)
         self.assertNotIn('test-only',result.stdout+result.stderr)
 
-    def test_transport_pins_host_key_and_only_polls_after_independent_start(self):
+    def test_transport_uses_ssh_only_for_controls_and_private_stdin(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);bindir=root/'bin';bindir.mkdir()
-            trace=root/'trace.jsonl';start=root/'start.sh'
+            trace=root/'trace.jsonl';start=root/'start.json'
             stub='''#!/usr/bin/env python3
 import json,os,sys
 assert 'TEST_SSH_PRIVATE_KEY' not in os.environ
+if os.path.basename(sys.argv[0])=='ssh':assert 'GH_TOKEN' not in os.environ
 with open(os.environ['CI_TEST_TRACE'],'a') as f:f.write(json.dumps([os.path.basename(sys.argv[0]),*sys.argv[1:]])+'\\n')
+if os.path.basename(sys.argv[0])=='scp':raise SystemExit('SCP must never be used')
 if os.path.basename(sys.argv[0])=='ssh':
     if 'cat' in sys.argv:print('{"phase":"succeeded"}')
     elif 'bash' in sys.argv:
         script=sys.stdin.read()
-        if 'check_supported_os' in script:
-            open(os.environ['CI_TEST_TRACE']+'.preflight','w').write(script)
-            if os.environ.get('CI_TEST_REJECT_HOST')=='1':sys.exit(42)
-        if 'systemd-run' in script:open(os.environ['CI_TEST_START'],'w').write(script)
+        open(os.environ['CI_TEST_TRACE']+'.preflight','w').write(script)
+        if os.environ.get('CI_TEST_REJECT_HOST')=='1':sys.exit(42)
+    else:
+        payload=json.load(sys.stdin)
+        assert payload['ticket']['url'].endswith('URL_SECRET_SENTINEL')
+        open(os.environ['CI_TEST_START'],'w').write(json.dumps(payload))
 '''
             for name in ('ssh','scp','ssh-keygen'):
                 (bindir/name).write_text(stub);(bindir/name).chmod(0o755)
-            stem='deploy-platform-0.5.2-linux-amd64'
-            (root/(stem+'.run')).write_bytes(b'test installer')
-            (root/(stem+'.sha256')).write_text(hashlib.sha256(b'test installer').hexdigest()+'  '+stem+'.run\n')
-            env=dict(os.environ,PATH=str(bindir)+os.pathsep+os.environ['PATH'],CI_TEST_TRACE=str(trace),CI_TEST_START=str(start),CI_ARTIFACT_DIR=str(root),TEST_SSH_PRIVATE_KEY='test-only',TEST_SSH_KNOWN_HOSTS='test-only',TEST_SERVER_HOST='127.0.0.1',TEST_SERVER_USER='ubuntu',TEST_SERVER_ARCH='amd64',GITHUB_RUN_ID='123',GITHUB_RUN_ATTEMPT='1',GITHUB_SHA=SHA,RELEASE_VERSION='0.5.2')
+            real_python=sys.executable
+            wrapper='#!'+real_python+'''
+import json,os,sys
+if len(sys.argv)>1 and sys.argv[1].endswith('artifact-request.py'):
+    if sys.argv[2]=='prepare':open(sys.argv[3],'w').write('{"commit":"a"}')
+    else:print(json.dumps({'request':{'commit':'a'},'ticket':{'url':'https://test.blob.core.windows.net/file?URL_SECRET_SENTINEL'},'files':{}}))
+else:os.execv('''+repr(real_python)+''', ['''+repr(real_python)+''', *sys.argv[1:]])
+'''
+            (bindir/'python3').write_text(wrapper);(bindir/'python3').chmod(0o755)
+            env=dict(os.environ,PATH=str(bindir)+os.pathsep+os.environ['PATH'],CI_TEST_TRACE=str(trace),CI_TEST_START=str(start),CI_ARTIFACT_DIR=str(root),TEST_SSH_PRIVATE_KEY='test-only',TEST_SSH_KNOWN_HOSTS='test-only',GH_TOKEN='test-only-gh',TEST_SERVER_HOST='127.0.0.1',TEST_SERVER_USER='ubuntu',TEST_SERVER_ARCH='amd64',GITHUB_RUN_ID='123',GITHUB_RUN_ATTEMPT='1',GITHUB_SHA=SHA,RELEASE_VERSION='0.5.3')
             result=subprocess.run(['bash',str(ROOT/'distribution/ci/deploy-test.sh')],env=env,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
-            self.assertIn('--no-block',start.read_text())
+            self.assertEqual(json.loads(start.read_text())['request']['commit'],'a')
             commands=[json.loads(line) for line in trace.read_text().splitlines()]
             for args in commands:
-                if args[0] in ('ssh','scp'):
+                self.assertNotEqual(args[0],'scp')
+                if args[0]=='ssh':
                     self.assertIn('StrictHostKeyChecking=yes',args)
                     self.assertIn('IdentitiesOnly=yes',args)
+            self.assertNotIn('URL_SECRET_SENTINEL',trace.read_text()+result.stdout+result.stderr)
             self.assertNotIn('test-only',trace.read_text()+result.stdout+result.stderr)
             preflight=Path(str(trace)+'.preflight').read_text()
             self.assertIn('check_supported_os',preflight)
             self.assertIn('server architecture',preflight)
             self.assertIn('cgroup.controllers',preflight)
-            # A rejected host must never receive or execute a package.
             trace.unlink();start.unlink()
             rejected=subprocess.run(['bash',str(ROOT/'distribution/ci/deploy-test.sh')],env=dict(env,CI_TEST_REJECT_HOST='1'),capture_output=True,text=True)
             self.assertEqual(rejected.returncode,42,rejected.stderr)
             self.assertFalse(start.exists())
-            self.assertTrue(all(json.loads(line)[0]!='scp' for line in trace.read_text().splitlines()))

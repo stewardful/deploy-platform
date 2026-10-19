@@ -5,7 +5,7 @@
 | 推送目标 | 自动执行 | 服务器影响 |
 | --- | --- | --- |
 | PR | 复用 dev 的完整检查与 amd64 安装包构建、摘要校验 | 不连接服务器，不读取 SSH 密钥 |
-| dev | 测试 → 按测试机架构构建 → SSH 上传 → 独立 systemd 升级与业务验证 | 自动更新指定测试服务器 |
+| dev | 测试 → 按测试机架构构建 → SSH 触发 HTTPS 下载 → 独立 systemd 升级与业务验证 | 自动更新指定测试服务器 |
 | main | 检查版本 → 测试 → amd64/arm64 构建 → 固定提交的版本标签 → 完整 Release | 正式节点通过网页提示后手动升级 |
 
 PR、dev 和 main 复用 [构建工作流](../.github/workflows/build-installers.yml)。测试未通过不会部署或公开 Release。只有 push 到对应分支或在对应分支手动运行才触发服务器部署或 Release 发布。PR 构建不读取服务器 SSH 密钥，产出 amd64 安装包并校验；arm64 仍在正式发版流程构建。
@@ -28,7 +28,7 @@ PR、dev 和 main 复用 [构建工作流](../.github/workflows/build-installers
 | --- | --- | --- |
 | `TEST_SERVER_ARCH` | `amd64` | `uname -m` 为 x86_64 选 amd64；aarch64/arm64 选 arm64 |
 
-`TEST_SSH_PRIVATE_KEY` 是进入服务器的 SSH 凭据，与服务器拉取私有 GitHub Release 使用的 Contents:read token 是两种凭据。dev 流程由 Actions 上传安装包，不需要在测试机配置 GitHub 下载 token。
+`TEST_SSH_PRIVATE_KEY` 是进入服务器的 SSH 凭据，与服务器拉取私有 GitHub Release 使用的 Contents:read token 是两种凭据。dev 流程使用 Actions 自带的短期 `GITHUB_TOKEN`（`actions: read`）在 CI 端获取产物下载地址，只通过 SSH 标准输入交给服务器；不新增用户 Secret，不在服务器保存 GitHub token。下载地址只允许 HTTPS 和 GitHub 产物 CDN 主机，保存在 root 私有文件中，下载完成或失败后删除。
 
 主机密钥应先通过腾讯云控制台或已可信连接获取指纹，再与本机扫描记录核对：
 
@@ -67,9 +67,15 @@ main 发版前提高 `Cargo.toml` 的 workspace 与内部组件版本，更新 C
 
 ## SSH 中断与排错
 
-[SSH 传输脚本](../distribution/ci/deploy-test.sh) 先核对 CI 资产 SHA256，再上传到私有目录。服务器再核对一遍，随后由 [独立执行器](../distribution/ci/remote-install.py) 在 `deploy-platform-ci-RUNID-ATTEMPT.service` 中运行安装器。SSH 断开、管理端重启不会杀死已启动的安装任务。
+[SSH 控制脚本](../distribution/ci/deploy-test.sh) 在传递下载授权前完成主机预检。CI 的 [产物提供器](../distribution/ci/artifact-request.py) 固定仓库、dev 分支、运行编号、提交、架构、产物 ID、ZIP 摘要/大小和安装包摘要/大小。开发产物只包含 `.run` 与 `.sha256`，保留 3 天，避免再下载内容重复的 `.tar.gz`；正式 Release 仍发布全部资产。
 
-Actions 等待最多三十分钟，只读轮询结果；失败时读取末尾安装日志，成功才报告部署成功。等待超时不代表远端取消，必须先检查远端状态再重跑，避免把网络问题当作部署失败。
+SSH 只传递少量控制数据和执行器源码，完全不使用 SCP 传包。[控制入口](../distribution/ci/remote-control.py) 创建 root 私有阶段目录，并通过独立 systemd unit 启动 [执行器](../distribution/ci/remote-install.py)。[下载组件](../distribution/ci/delivery.py) 通过 HTTPS 流式下载、断点恢复，验证 ZIP 摘要，再从封闭文件清单安全解包并验证安装包摘要。校验完成后才调用原 `.run --check` 和 `.run --upgrade`，已有节点加 `--skip-apt`，不跳过兼容性、维护排空、备份、业务验证与失败回退。
+
+下载默认最多 15 分钟，独立下载子进程有硬超时；网络错误最多 4 次尝试，接受 Range 时续传，不支持 Range 时重新写入，禁止拼接错误内容。过期地址通过 `awaiting_url` 请求 CI 刷新，最多 3 次，每次等待最多 90 秒且受总下载时限约束。CI 已断开时无法获取新授权，下载会有界失败，不开始安装。没有后台轮询服务、timer 或新的平台 API。
+
+SSH 断开、管理端重启不影响已接受的 systemd 任务；下载完成后不再需要 CI 在线。独立工作锁覆盖下载和安装，阻止上一个运行端断线后发生重叠部署。控制文件与下载地址不进入命令参数或日志，不把仓库 token 发给服务器。
+
+Actions 等待最多三十分钟，只读查询阶段和下载进度；必要时发送地址刷新控制请求。只在服务器确认安装提交和业务验证通过后报告成功。等待超时或取消 CI 不代表远端取消，必须检查远端状态再重跑。下载失败不会进入安装；安装失败继续使用原恢复流程，不主动终止正在执行的安装器。Actions 部署 job 自身最多 45 分钟，独立远端 unit 不随 job 结束而被杀死。
 
 从该 Actions 运行 URL 获取 RUNID，重跑次数为 ATTEMPT，例如：
 
@@ -79,15 +85,15 @@ sudo cat /var/tmp/deploy-platform-ci-RUNID-ATTEMPT/result.json
 sudo tail -n 100 /var/tmp/deploy-platform-ci-RUNID-ATTEMPT/install.log
 ```
 
-结果包含部署的完整提交 SHA。成功删除上传的临时安装包，失败保留以供恢复。安装器的 release 与备份按原策略保留，不自动删除业务数据；频繁测试时应检查磁盘。失败回退规则与网页升级一致，未完成的安装事务需按升级指南恢复。
+结果包含部署的完整提交 SHA。成功删除下载的临时安装包，失败保留以供恢复。安装器的 release 与备份按原策略保留，不自动删除业务数据；频繁测试时应检查磁盘。失败回退规则与网页升级一致，未完成的安装事务需按升级指南恢复。
 
 ## 本地验证范围
 
-组件测试验证版本/架构、标签固定 main 提交、拒绝覆盖版本、同提交发布幂等、资产完整性、权限错误、上传摘要、执行结果和不可信 SSH 参数。真实 GitHub Actions、指定服务器连接及仓库 Secrets 仍需配置并首次推送后观察，不因本地测试通过而宣称已上线。
+组件测试验证版本/架构、标签固定 main 提交、拒绝覆盖版本、同提交发布幂等、资产完整性、权限错误、下载摘要、执行结果和不可信 SSH 参数。真实 GitHub Actions、指定服务器连接及仓库 Secrets 仍需配置并首次推送后观察，不因本地测试通过而宣称已上线。
 
 触发器和并发行为依据 [GitHub 工作流事件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows) 与 [部署并发说明](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments)。
 
-本次本地验收：54 项安装器/CI 组件测试通过，actionlint、ShellCheck、Bash 语法及文档链接检查通过。新增 [ci-ssh-smoke.sh](../distribution/tests/ci-ssh-smoke.sh) 使用 2 CPU / 2 GiB 的可删除 Ubuntu 节点和临时 SSH 密钥，实测错误主机密钥拒绝、正确密钥上传并首次安装、第二次部署开始后断开运行端连接仍完成升级。没有连接指定腾讯云服务器，也没有读取真实部署私钥。
+本地组件测试覆盖下载边界、TLS/来源限制、ZIP 路径与链接、摘要/长度、URL 刷新、续传与总超时。PR 在原生 amd64 节点额外验证真实 GitHub ZIP 摘要/大小与解包契约。[ci-ssh-smoke.sh](../distribution/tests/ci-ssh-smoke.sh) 在隔离 2 CPU / 2 GiB Ubuntu 节点使用临时密钥和仅该节点信任的 HTTPS 端点，运行真实 SSH、下载、systemd 和安装器，验证错误主机密钥、损坏包拒绝、地址过期刷新、传输中断续传、并发拒绝，以及运行端断线后继续完成升级。GitHub 元数据授权在此隔离测试中使用 fixture；真实 API 与 ZIP 格式由独立 PR 契约测试覆盖。
 
 ```bash
 bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-VERSION-linux-ARCH.run
