@@ -2,6 +2,8 @@
 # Disposable SSH target only; never contacts a user server or reads a real key.
 set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source=distribution/tests/node-exec.sh
+source "$ROOT/distribution/tests/node-exec.sh"
 UBUNTU_VERSION=${UBUNTU_VERSION:-24.04}
 [[ $UBUNTU_VERSION == 24.04 || $UBUNTU_VERSION == 26.04 ]] || { echo 'test Ubuntu must be 24.04 or 26.04' >&2; exit 2; }
 INSTALLER=${1:?absolute installer path with sibling .sha256}
@@ -28,20 +30,20 @@ docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution
 docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2g --pids-limit=512 \
     -p 127.0.0.1::22 --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=2g "cloud-ci-ssh-test:$UBUNTU_VERSION" >/dev/null
 ssh-keygen -q -t ed25519 -N '' -f "$work/key"
-docker exec "$NAME" mkdir -p -m 0700 /root/.ssh
+node_exec "$NAME" mkdir -p -m 0700 /root/.ssh
 docker cp "$work/key.pub" "$NAME:/root/.ssh/authorized_keys" >/dev/null
-docker exec "$NAME" chown root:root /root/.ssh/authorized_keys
-docker exec "$NAME" chmod 0600 /root/.ssh/authorized_keys
+node_exec "$NAME" chown root:root /root/.ssh/authorized_keys
+node_exec "$NAME" chmod 0600 /root/.ssh/authorized_keys
 # The base Docker root account is locked; enable key-only auth in this disposable node.
-docker exec "$NAME" passwd -d root >/dev/null
-docker exec -i "$NAME" sh -c 'cat > /etc/ssh/sshd_config.d/00-ci-test.conf' <<'SSHD'
+node_exec "$NAME" passwd -d root >/dev/null
+node_exec -i "$NAME" sh -c 'cat > /etc/ssh/sshd_config.d/00-ci-test.conf' <<'SSHD'
 PermitRootLogin prohibit-password
 PasswordAuthentication no
 UsePAM no
 SSHD
-docker exec "$NAME" systemctl start ssh.service
+node_exec "$NAME" systemctl start ssh.service
 TEST_SERVER_PORT=$(docker port "$NAME" 22/tcp | sed 's/.*://')
-public=$(docker exec "$NAME" cat /etc/ssh/ssh_host_ed25519_key.pub)
+public=$(node_exec "$NAME" cat /etc/ssh/ssh_host_ed25519_key.pub)
 TEST_SSH_KNOWN_HOSTS="[127.0.0.1]:$TEST_SERVER_PORT $public"
 TEST_SSH_PRIVATE_KEY=$(cat "$work/key")
 TEST_SERVER_HOST=127.0.0.1 TEST_SERVER_USER=root
@@ -66,10 +68,10 @@ def digest(path):
     return value.hexdigest()
 (work/'request.json').write_text(json.dumps({'schema_version':1,'repository':'owner/repo','run_id':'1','attempt':'1','commit':'a'*40,'version':source.name.split('-')[2],'arch':source.name.split('-')[-1].split('.')[0],'artifact_id':99,'archive_sha256':digest(archive),'archive_size':archive.stat().st_size,'installer_sha256':digest(source),'installer_size':source.stat().st_size,'download_seconds':180}))
 PYARCHIVE
-docker exec "$NAME" touch /run/cloud-ci-delivery-isolated-test
+node_exec "$NAME" touch /run/cloud-ci-delivery-isolated-test
 docker cp "$work/artifact.zip" "$NAME:/var/tmp/artifact.zip" >/dev/null
 docker cp "$ROOT/distribution/tests/ci-delivery-runtime.py" "$NAME:/var/tmp/ci-delivery-runtime.py" >/dev/null
-docker exec "$NAME" python3 -B /var/tmp/ci-delivery-runtime.py setup
+node_exec "$NAME" python3 -B /var/tmp/ci-delivery-runtime.py setup
 mkdir "$work/bin"
 real_python=$(command -v python3)
 # Stub only the CI-side GitHub authorization. Real SSH, TLS, download, archive validation,
@@ -103,19 +105,19 @@ wrong="[127.0.0.1]:$TEST_SERVER_PORT $(cat "$work/key.pub")"
 if TEST_SSH_KNOWN_HOSTS="$wrong" bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/wrong-host.log" 2>&1; then
     echo 'wrong host key was accepted' >&2; exit 1
 fi
-docker exec "$NAME" test ! -e /etc/deploy-platform/install.json
+node_exec "$NAME" test ! -e /etc/deploy-platform/install.json
 echo 'PASS: wrong SSH host key refused before download/installation'
 if bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/corrupt.log" 2>&1; then echo 'corrupt artifact was installed' >&2; exit 1; fi
-docker exec "$NAME" test ! -e /etc/deploy-platform/install.json
-docker exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="archive_digest_mismatch"' "/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-1/result.json"
+node_exec "$NAME" test ! -e /etc/deploy-platform/install.json
+node_exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="archive_digest_mismatch"' "/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-1/result.json"
 echo 'PASS: corrupt HTTPS archive rejected before installation'
 GITHUB_RUN_ATTEMPT=2 CI_FIXTURE_MODE=resume-expired
 export GITHUB_RUN_ATTEMPT CI_FIXTURE_MODE
 if ! bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh"; then
-    docker exec "$NAME" journalctl -u "deploy-platform-ci-$GITHUB_RUN_ID-2" -n 40 --no-pager
+    node_exec "$NAME" journalctl -u "deploy-platform-ci-$GITHUB_RUN_ID-2" -n 40 --no-pager
     exit 1
 fi
-docker exec "$NAME" python3 -c 'from pathlib import Path; assert any(int(x)>0 for x in Path("/var/tmp/ci-range-offsets").read_text().splitlines())'
+node_exec "$NAME" python3 -c 'from pathlib import Path; assert any(int(x)>0 for x in Path("/var/tmp/ci-range-offsets").read_text().splitlines())'
 echo 'PASS: expired URL refreshed, interrupted HTTPS resumed, verified first install succeeded'
 # A second accepted deployment must finish even if the Actions runner disconnects.
 GITHUB_RUN_ATTEMPT=3 CI_FIXTURE_MODE=slow
@@ -125,7 +127,7 @@ runner_pid=$!
 stage=/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-3
 started=0
 for ((attempt=0; attempt<60; attempt++)); do
-    if docker exec "$NAME" test -f "$stage/result.json"; then started=1; break; fi
+    if node_exec "$NAME" test -f "$stage/result.json"; then started=1; break; fi
     sleep 1
 done
 [[ $started == 1 ]]
@@ -136,17 +138,17 @@ runner_pid=''
 GITHUB_RUN_ATTEMPT=4
 export GITHUB_RUN_ATTEMPT
 if bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/busy.log" 2>&1; then echo 'concurrent delivery unexpectedly accepted' >&2; exit 1; fi
-docker exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="deployment_busy"' "/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-4/result.json"
+node_exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="deployment_busy"' "/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-4/result.json"
 echo 'PASS: parallel delivery rejected by independent worker lock'
 finished=0
 for ((attempt=0; attempt<180; attempt++)); do
-    phase=$(docker exec "$NAME" python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["phase"])' "$stage/result.json")
+    phase=$(node_exec "$NAME" python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["phase"])' "$stage/result.json")
     if [[ $phase == succeeded ]]; then finished=1; break; fi
-    if [[ $phase == failed ]]; then docker exec "$NAME" cat "$stage/install.log"; exit 1; fi
+    if [[ $phase == failed ]]; then node_exec "$NAME" cat "$stage/install.log"; exit 1; fi
     sleep 1
 done
 [[ $finished == 1 ]]
-docker exec "$NAME" test ! -e /var/lib/deploy-platform/install-transaction.json
-docker exec "$NAME" test ! -e "$stage/download.json"
-docker exec "$NAME" cloudctl maintenance status
+node_exec "$NAME" test ! -e /var/lib/deploy-platform/install-transaction.json
+node_exec "$NAME" test ! -e "$stage/download.json"
+node_exec "$NAME" cloudctl maintenance status
 echo 'PASS: runner disconnect does not cancel HTTPS download or protected upgrade'

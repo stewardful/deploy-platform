@@ -117,3 +117,5 @@ make installer-test
 首次 dev 安装需要下载上游基础依赖，仍会受 GitHub 网络速度影响；之后同版本依赖无需重复下载。这里复用的是官方已发布的归档和本地校验缓存，不额外维护一份自有基础依赖 Release。缓存不会自动删除，运维可在无安装任务时删除依赖缓存以释放空间，下次按需重建；不要删除 current/releases 或业务数据来清缓存。
 
 `main` 和手动 `make release-build` 默认 `PACKAGE_KIND=offline`，继续生成含全部依赖的 `.run`、`.tar.gz` 和 `.sha256`。离线包无需下载运行时，但操作系统软件包和首次部署业务镜像仍需提前准备或联网。PR 同时构建、校验并在 Ubuntu 24.04/26.04 上安装更新包和离线包；还验证阻断外部 HTTPS 后仍可重复安装，以及真实 SSH/TLS 故障链路。Ubuntu 26.04 还验证离线安装 → 同提交更新包的升级流程，部署真实前后端、PostgreSQL/Redis 和隔离 CA 的 HTTPS，确认数据保留及注入业务故障后的回退；同提交验收不等同于跨历史版本迁移或公网证书验收。Rust crates、Go packages 和前端组件继续编译进平台程序，不拆成每次独立发布的资产。运行时版本变化仍受现有升级兼容性限制，不能通过缓存机制绕过计划迁移要求。
+
+隔离 systemd-in-Docker 节点统一通过 `distribution/tests/node-exec.sh` 执行命令：将测试命令移入 `init.scope`，通过 systemd 恢复资源控制器，避免 Docker exec 将命令留在根 cgroup、关闭子控制器后出现 `pids.max` 缺失。入口拒绝非测试节点，保留参数与标准输入；这不是生产安装配置或资源限制的放宽。`cloudctl smoke` 现在在首次运行和 Agent 恢复后都读取实际 cgroup v2 的 CPU/内存/PID 限制，避免仅检查容器配置而误报资源约束通过。
