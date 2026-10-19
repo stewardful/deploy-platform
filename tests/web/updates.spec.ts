@@ -31,9 +31,23 @@ test('new release is shown and upgrade requires explicit confirmation; reconnect
   await expect(page.getByText('发现新版本 0.5.2')).toBeVisible();
   expect(submissions).toBe(0);
   await page.getByRole('button', { name: '升级到 0.5.2' }).click();
-  await expect(page.getByRole('dialog', { name: '升级平台' })).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: '升级平台' });
+  await expect(dialog).toBeVisible();
+  // TDesign can paint two stable scaled frames before its entry animation moves
+  // the button. Wait for its transition lifecycle, never retry an upgrade click.
+  await expect(dialog).not.toHaveClass(
+    /(?:^|\s)t-dialog-zoom-(?:enter|appear)(?:-active)?(?:\s|$)/,
+  );
   expect(submissions).toBe(0);
+  const accepted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/updates/upgrade') &&
+      response.request().method() === 'POST' &&
+      response.status() === 202,
+  );
   await page.getByRole('button', { name: '确认升级', exact: true }).click();
+  await accepted;
+  await expect(dialog).toBeHidden();
   await expect(page.getByText('升级请求已排队', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '升级到 0.5.2' })).toBeDisabled();
   await page.reload();
