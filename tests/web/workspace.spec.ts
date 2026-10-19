@@ -54,6 +54,7 @@ test('browser manages applications, retains task IDs and replays an uncertain su
   // Agent accepts start, but the browser loses its response. Retry must reuse the key.
   let requestID = '';
   let acceptedID = 0;
+  let responseLost = false;
   await page.route(
     '**/api/v1/apps/demo/web/start',
     async (route) => {
@@ -61,11 +62,16 @@ test('browser manages applications, retains task IDs and replays an uncertain su
       const response = await route.fetch();
       acceptedID = (await response.json()).id;
       await route.abort('connectionfailed');
+      responseLost = true;
     },
     { times: 1 },
   );
   await row.getByRole('button', { name: '启动', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: '启动应用', exact: true }).click();
+  // The pending banner exists before sending; wait for this deliberate network
+  // failure to finish before reload, so the captured accepted ID is authoritative.
+  await expect.poll(() => responseLost).toBe(true);
+  expect(acceptedID).toBeGreaterThan(0);
   await expect(page.getByText('有一笔提交尚未确认', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '部署应用', exact: true })).toBeDisabled();
   await page.reload();
