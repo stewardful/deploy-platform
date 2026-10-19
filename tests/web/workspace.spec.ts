@@ -117,13 +117,18 @@ test('write-only secrets and PostgreSQL template keep values out of browser stor
   await page.getByLabel('项目名称', { exact: true }).fill(project);
   await page.getByLabel('新密钥名称', { exact: true }).fill('db-password');
   await page.getByLabel('密钥内容', { exact: true }).fill(secretValue);
-  const response = page.waitForResponse(
-    (r) => r.url().endsWith('/api/v1/secrets') && r.request().method() === 'POST',
-  );
+  let savedResponse: { status: number; body: string } | undefined;
+  await page.route('**/api/v1/secrets', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    // Capture the real server response before delivery, independent of Chromium's response cache.
+    const response = await route.fetch();
+    savedResponse = { status: response.status(), body: await response.text() };
+    await route.fulfill({ response });
+  });
   await page.getByRole('button', { name: '保存密钥', exact: true }).click();
-  const result = await response;
-  expect(result.status()).toBe(202);
-  expect(await result.text()).not.toContain(secretValue);
+  await expect.poll(() => savedResponse).toBeDefined();
+  expect(savedResponse!.status).toBe(202);
+  expect(savedResponse!.body).not.toContain(secretValue);
   await expect(page.getByLabel('密钥内容', { exact: true })).toHaveValue('');
   await page.screenshot({ path: 'test-results/secrets-panel.png', fullPage: true });
   expect(

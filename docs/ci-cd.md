@@ -4,10 +4,11 @@
 
 | 推送目标 | 自动执行 | 服务器影响 |
 | --- | --- | --- |
+| PR | 复用 dev 的完整检查与 amd64 安装包构建、摘要校验 | 不连接服务器，不读取 SSH 密钥 |
 | dev | 测试 → 按测试机架构构建 → SSH 上传 → 独立 systemd 升级与业务验证 | 自动更新指定测试服务器 |
 | main | 检查版本 → 测试 → amd64/arm64 构建 → 固定提交的版本标签 → 完整 Release | 正式节点通过网页提示后手动升级 |
 
-两条流程复用 [构建工作流](../.github/workflows/build-installers.yml)。测试未通过不会部署或公开 Release。只有 push 到对应分支或在对应分支手动运行才触发交付，PR 构建不读取服务器 SSH 密钥。
+PR、dev 和 main 复用 [构建工作流](../.github/workflows/build-installers.yml)。测试未通过不会部署或公开 Release。只有 push 到对应分支或在对应分支手动运行才触发服务器部署或 Release 发布。PR 构建不读取服务器 SSH 密钥，产出 amd64 安装包并校验；arm64 仍在正式发版流程构建。
 
 ## GitHub Secrets 与 Variables
 
@@ -62,7 +63,7 @@ main 发版前提高 `Cargo.toml` 的 workspace 与内部组件版本，更新 C
 
 不再通过推送版本标签启动第二次发布。需要重跑时，在 Actions 中重跑失败任务，或选择对应分支手动运行工作流。
 
-当前仓库已创建 dev 并设置为 GitHub 默认分支，本地也已切换并保留未提交改动。工作流代码仍需提交并推送后生效。
+仓库默认分支为 dev。修复通过 PR 合并到 dev 后，自动触发测试服务器部署；PR 检查通过不代表服务器已经更新。
 
 ## SSH 中断与排错
 

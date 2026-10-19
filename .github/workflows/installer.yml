@@ -8,3 +8,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: make installer-test shellcheck workflow-check
+  build:
+    # Exercise the same installer pipeline as dev before merging, without SSH secrets.
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/build-installers.yml
+    with:
+      arch: amd64
