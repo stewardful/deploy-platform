@@ -41,7 +41,7 @@ jobs:
         with:
           name: deploy-platform-linux-${{ vars.TEST_SERVER_ARCH || 'amd64' }}
           path: dist
-      - name: Trigger HTTPS download and protected independent installer
+      - name: Call preinstalled delivery tool for protected HTTPS deployment
         if: steps.current.outputs.deploy == 'true'
         env:
           GH_TOKEN: ${{ github.token }}

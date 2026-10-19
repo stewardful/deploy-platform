@@ -55,7 +55,13 @@ def serve():
                     sent+=len(data)
                     if broken and sent>=1024*1024:
                         Path('/run/cloud-ci-broken-once').touch();self.close_connection=True;return
-                    if mode=='slow':time.sleep(0.3)
+                    if mode=='slow':
+                        if sent == len(data):
+                            Path('/run/cloud-ci-slow-started').touch()
+                            deadline=time.monotonic()+60
+                            while not Path('/run/cloud-ci-release-slow').exists() and time.monotonic()<deadline:
+                                time.sleep(0.1)
+                        time.sleep(0.3)
     server=http.server.ThreadingHTTPServer(('127.0.0.1',14443),Handler)
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain('/usr/local/share/ca-certificates/ci-artifact.crt','/var/tmp/ci-artifact.key')
