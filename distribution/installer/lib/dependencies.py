@@ -147,6 +147,10 @@ def materialize(source, *, current=Path('/opt/deploy-platform/current'), cache=P
     try:
         old = archive.verify(current, manifest['arch'])
         if old.get('package_kind', 'offline') != 'offline': old = None
+        elif 'proxy' not in old:
+            # Historical releases pin Caddy in an inventoried file rather than
+            # a top-level manifest field (same compatibility rule as upgrader).
+            old['proxy'] = json.loads((current/'proxy/proxy.lock.json').read_text())
     except (OSError, ValueError): pass
     if cache.is_symlink() or cache.parent.is_symlink(): raise ValueError('linked dependency cache')
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)

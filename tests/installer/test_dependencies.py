@@ -184,3 +184,13 @@ class DependencyTests(unittest.TestCase):
             with self.assertRaises(OSError): deps.fetch('https://github.com/owner/repo/file', destination, '0'*64)
         self.assertEqual(client.open.call_count, 3)
         self.assertFalse(destination.exists()); self.assertFalse(destination.with_suffix('.part').exists())
+
+    def test_legacy_release_without_proxy_manifest_field_reuses_verified_lock_file(self):
+        self.materialize(); shutil.copytree(self.source, self.current)
+        value = json.loads((self.current/'manifest.json').read_text())
+        value.pop('proxy'); value.pop('package_kind')
+        (self.current/'manifest.json').write_text(json.dumps(value))
+        archive.verify(self.current)
+        shutil.rmtree(self.cache); self.reset()
+        self.materialize(lambda *a: self.fail('legacy dependency downloaded again'))
+        self.assertEqual(archive.verify(self.source)['package_kind'], 'offline')
