@@ -4,7 +4,7 @@
 # container root cgroup. Move the command into init.scope and ask systemd to
 # realize the resource hierarchy again before testing nested containers.
 node_exec() {
-    local options=() node
+    local options=(exec) node
     while (( $# )); do
         case $1 in
             -i|-t) options+=("$1"); shift;;
@@ -17,7 +17,7 @@ node_exec() {
     (( $# >= 2 )) || return 2
     node=$1; shift
     [[ $node =~ ^cloud-(installer|upgrade|ci-ssh)-test-[0-9]+$ ]] || { echo 'disposable test node required' >&2; return 2; }
-    command docker exec "${options[@]}" "$node" /bin/sh -ec '
+    command docker "${options[@]}" "$node" /bin/sh -ec '
         attempts=0
         until [ -f /sys/fs/cgroup/init.scope/cgroup.procs ]; do
             attempts=$((attempts+1)); [ "$attempts" -lt 40 ] || exit 1

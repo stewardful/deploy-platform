@@ -28,6 +28,10 @@ class NodeExecTests(unittest.TestCase):
             self.assertEqual(value['argv'][-4:],['cloud-test-command','printf','%s','$(never execute)'])
             self.assertIn('/sys/fs/cgroup/init.scope/cgroup.procs',value['argv'][7])
             self.assertIn('TasksAccounting=yes',value['argv'][7])
+            # macOS Bash 3.2 treats an empty array as unbound under set -u.
+            plain = subprocess.run(['bash','-uc','source "$1"; node_exec cloud-installer-test-123 true','node-test',str(HELPER)], input=payload, env=env, capture_output=True, text=True)
+            self.assertEqual(plain.returncode,0,plain.stderr)
+            self.assertEqual(json.loads(plain.stdout)['argv'][:2],['exec','cloud-installer-test-123'])
 
     def test_unowned_nodes_and_unknown_options_are_rejected_before_docker(self):
         for args in (['production','true'],['cloud-installer-test-123;echo','true'],['--privileged','cloud-installer-test-123','true']):
