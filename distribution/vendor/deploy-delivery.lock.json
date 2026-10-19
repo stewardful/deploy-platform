@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "repository": "stewardful/deploy-delivery",
-  "commit": "cdd6bbfcdeaa1a406611e6ba2801523fc059a64a",
+  "commit": "db9e9aa51aafd0c3ccdd779d527e1f403e21670b",
   "files": {
-    "README.md": "a17296fb5f1bc0d6f692ca9bcbe1a5f50e6441abd9f6899789eba3a3fff50b90",
+    "README.md": "7bbeafb7da24674c04dbaa6ce70efec2d9c7b54a688bebc9a752f4f3ad9391fe",
     "scripts/artifact-request.py": "44cc781733c55ed7a9ac70cefdae77b2c7cbe40e7d7da01e0b47169a74fb539e",
     "scripts/delivery.py": "16e437a988ef9d5e74e5ad165d512af55860900444b9fee2c3bca172078f502f",
     "scripts/deploy-test.sh": "79a9f6f833839df12fe4c35651b69f784b533f7150bf91d150005da3b346c87d",

@@ -33,3 +33,33 @@ class VendorTests(unittest.TestCase):
         with patch.object(vendor.subprocess, 'check_output') as git, self.assertRaises(ValueError):
             vendor.sync('/unused', 'main')
         git.assert_not_called()
+
+    def test_sync_imports_component_files_without_privileged_automation(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, dest, lock = root/'source', root/'snapshot', root/'lock.json'
+            source.mkdir()
+            content = {'scripts/deploy-test.sh': '#!/bin/bash\n',
+                       'tests/test_delivery.py': '# component test\n',
+                       'README.md': '# delivery\n',
+                       'automation/update-platform.py': '# privileged CI updater\n',
+                       'automation/tests/vendor-delivery.fixture': '# consumer fixture\n',
+                       '.github/workflows/check.yml': '# workflow\n'}
+            for name, data in content.items():
+                path = source/name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(data)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(source), *args], stderr=subprocess.DEVNULL).decode().strip()
+            git('init')
+            git('add', '.')
+            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture')
+            sha = git('rev-parse', 'HEAD')
+            with patch.object(vendor, 'DEST', dest), patch.object(vendor, 'LOCK', lock):
+                vendor.sync(str(source), sha)
+                vendor.check()
+            self.assertEqual(set(json.loads(lock.read_text())['files']),
+                             {'scripts/deploy-test.sh', 'tests/test_delivery.py', 'README.md'})
+            self.assertFalse((dest/'automation').exists())
+            self.assertFalse((dest/'.github').exists())

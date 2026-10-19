@@ -103,12 +103,16 @@ bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-VERSION-linux-ARCH.
 
 ## 独立交付工具与基础依赖复用
 
-交付脚本和组件测试的权威来源是私有仓库 [stewardful/deploy-delivery](https://github.com/stewardful/deploy-delivery)。平台提交经过审查的 `distribution/vendor/deploy-delivery/` 源码快照，`deploy-delivery.lock.json` 固定完整提交 SHA 和每个文件的 SHA256；`make installer-test` 首先校验快照，再执行上游交付测试。正常 PR/dev/main 不访问另一个私有仓库，不增加 Secret。不要直接修改快照，先在辅助仓库提交并验证，再显式同步：
+交付脚本和组件测试的权威来源是私有仓库 [stewardful/deploy-delivery](https://github.com/stewardful/deploy-delivery)。平台提交经过审查的 `distribution/vendor/deploy-delivery/` 源码快照，`deploy-delivery.lock.json` 固定完整提交 SHA 和每个文件的 SHA256；`make installer-test` 首先校验快照，再执行上游交付测试。正常平台 PR/dev/main 不访问另一个私有仓库，不增加 Secret。不要直接修改快照，先在辅助仓库提交并验证，再显式同步：
 
 ```bash
 python3 distribution/ci/vendor-delivery.py sync --source /ABS/deploy-delivery --revision FULL_40_CHARACTER_COMMIT_SHA
 make installer-test
 ```
+
+辅助仓库现已增加“main 测试通过 → 创建平台组件更新 PR”的可选联动，配置见 [deploy-delivery 自动化说明](https://github.com/stewardful/deploy-delivery/blob/main/automation/README.md)。需要在 **deploy-delivery** 设置一个普通变量 `DELIVERY_APP_ID` 和一个 Secret `DELIVERY_APP_PRIVATE_KEY`，使用只安装到 deploy-platform、仅 Contents/PR 写权限的 GitHub App；不是原有 SSH 私钥。缺少配置时会明确提示未启用，不影响组件测试。平台仓库无需新增凭据。
+
+更新 PR 固定以 `dev` 为目标，每个通过 CI 的最新 main 提交使用独立 `codex/deploy-delivery-完整SHA` 分支，只修改快照和 lock，重新运行组件测试后提交；重跑复用原 PR，不覆盖远端分支、不自动合并。平台收到 App 创建的 PR 后会正常触发完整 CI。多个版本可产生多个 PR，应关闭被新版替代的旧 PR。**本 PR #4 合并前，dev 尚无同步协议时，自动更新明确报告 NOT READY；不会因此合并 #4 或部署服务器。** 合并 #4、完成凭据配置后，可手动运行辅助仓库 main 工作流验证联动。仅创建 PR 不部署，之后人工合并 dev 才会进入现有部署流程。
 
 `dev` 使用 `PACKAGE_KIND=platform-update`：完整包含平台 Agent、控制端、Web、安装器、迁移和服务配置，但不下载或打包外部运行时二进制。`.run --check` 只校验更新包自身，不联网；成功不代表基础依赖已准备好或已安装。服务器在持有安装锁时，按清单的版本、架构和锁定摘要补齐依赖，再生成完整候选版本，通过原升级保护后才切换服务。不会在服务器编译平台源码。
 
