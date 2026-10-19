@@ -67,7 +67,7 @@ jobs:
         if: matrix.ubuntu == '26.04'
         run: |
           mkdir -p target/upgrade-fixture
-          (cd examples/fullstack/service && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$GITHUB_WORKSPACE/target/upgrade-fixture/fullstack-demo" .)
+          (cd examples/fullstack/service && GOWORK=off CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$GITHUB_WORKSPACE/target/upgrade-fixture/fullstack-demo" .)
           docker build -f distribution/tests/Dockerfile.fullstack -t cloud-fullstack-demo:upgrade-check target/upgrade-fixture
           docker save cloud-fullstack-demo:upgrade-check -o target/upgrade-demo.tar
       - name: Verify update data retention and failed-activation rollback
