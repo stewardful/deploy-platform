@@ -8,6 +8,10 @@ case $(uname -m) in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; *) exit 1;;
 VERSION=${VERSION:-0.5.3}
 CACHE=${RELEASE_CACHE:-$ROOT/target/release-cache}
 mkdir -p "$CACHE" "$ROOT/target/release-bin/$ARCH"
+PACKAGE_KIND=${PACKAGE_KIND:-offline}
+[[ $PACKAGE_KIND == offline || $PACKAGE_KIND == platform-update ]] || exit 2
+args=(--kind "$PACKAGE_KIND")
+if [[ $PACKAGE_KIND == offline ]]; then
 URL=$(python3 - "$ARCH" <<'PY'
 import json,sys
 r=json.load(open('distribution/release/runtime.lock.json'));print(r['archive_url_template'].format(arch=sys.argv[1]))
@@ -31,9 +35,12 @@ if [[ ! -f $PROXY ]]; then
     curl --proto '=https' --tlsv1.2 --fail --location --retry 3 --connect-timeout 20 --max-time 300 "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_$ARCH.tar.gz" -o "$PROXY.part"
     mv "$PROXY.part" "$PROXY"
 fi
+args+=(--runtime-archive "$RUNTIME" --proxy-archive "$PROXY")
+fi
+
 npm ci
 npm run web:build
 cargo build --release --locked -j 1 -p node-agent --bins
 cp target/release/agentd target/release/agentctl "target/release-bin/$ARCH/"
 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "target/release-bin/$ARCH/controld" ./apps/controlplane/cmd/controld
-python3 distribution/release/package.py --arch "$ARCH" --version "$VERSION" --bin-dir "target/release-bin/$ARCH" --runtime-archive "$RUNTIME" --proxy-archive "$PROXY"
+python3 distribution/release/package.py --arch "$ARCH" --version "$VERSION" --bin-dir "target/release-bin/$ARCH" --output "${RELEASE_OUTPUT:-target/dist}" "${args[@]}"

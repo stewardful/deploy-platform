@@ -69,15 +69,37 @@ jobs:
           go-version: '1.25.x'
           cache: false
       - run: rustup toolchain install 1.96.0 --profile minimal && rustup default 1.96.0
-      - name: Build offline installer
+      - name: Build requested platform package
         env:
           VERSION: ${{ needs.validate.outputs.version }}
+          PACKAGE_KIND: ${{ inputs.delivery && 'platform-update' || 'offline' }}
         run: make release-build
       - name: Verify installer and checksums
         run: |
           bash target/dist/deploy-platform-*-linux-${{ matrix.arch }}.run --check
           cd target/dist
           sha256sum -c ./*.sha256
+      - name: Build and check the formal offline package on PRs
+        if: github.event_name == 'pull_request' && inputs.delivery
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          PACKAGE_KIND: offline
+          RELEASE_OUTPUT: target/offline
+        run: |
+          make release-build
+          bash target/offline/deploy-platform-*-linux-${{ matrix.arch }}.run --check
+          cd target/offline
+          sha256sum -c ./*.sha256
+      - uses: actions/upload-artifact@v6
+        if: github.event_name == 'pull_request' && inputs.delivery
+        with:
+          name: deploy-platform-offline-linux-${{ matrix.arch }}
+          path: |
+            target/offline/*.run
+            target/offline/*.sha256
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
       - uses: actions/upload-artifact@v6
         if: ${{ !inputs.delivery }}
         with:

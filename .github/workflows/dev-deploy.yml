@@ -18,7 +18,7 @@ jobs:
       arch: ${{ vars.TEST_SERVER_ARCH || 'amd64' }}
       delivery: true
   deploy:
-    timeout-minutes: 45
+    timeout-minutes: 50
     needs: build
     runs-on: ubuntu-24.04
     steps:
@@ -45,6 +45,8 @@ jobs:
         if: steps.current.outputs.deploy == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_ARTIFACT_DIR: ${{ github.workspace }}/dist
+          DEPLOY_WAIT_SECONDS: '2400'
           TEST_SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
           TEST_SSH_KNOWN_HOSTS: ${{ secrets.TEST_SSH_KNOWN_HOSTS }}
           TEST_SERVER_HOST: ${{ secrets.TEST_SERVER_HOST }}
@@ -52,4 +54,4 @@ jobs:
           TEST_SERVER_PORT: ${{ secrets.TEST_SERVER_PORT || '22' }}
           TEST_SERVER_ARCH: ${{ vars.TEST_SERVER_ARCH || 'amd64' }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
-        run: bash distribution/ci/deploy-test.sh
+        run: bash distribution/vendor/deploy-delivery/scripts/deploy-test.sh

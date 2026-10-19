@@ -67,15 +67,15 @@ main 发版前提高 `Cargo.toml` 的 workspace 与内部组件版本，更新 C
 
 ## SSH 中断与排错
 
-[SSH 控制脚本](../distribution/ci/deploy-test.sh) 在传递下载授权前完成主机预检。CI 的 [产物提供器](../distribution/ci/artifact-request.py) 固定仓库、dev 分支、运行编号、提交、架构、产物 ID、ZIP 摘要/大小和安装包摘要/大小。开发产物只包含 `.run` 与 `.sha256`，保留 3 天，避免再下载内容重复的 `.tar.gz`；正式 Release 仍发布全部资产。
+[SSH 控制脚本](../distribution/vendor/deploy-delivery/scripts/deploy-test.sh) 在传递下载授权前完成主机预检。CI 的 [产物提供器](../distribution/vendor/deploy-delivery/scripts/artifact-request.py) 固定仓库、dev 分支、运行编号、提交、架构、产物 ID、ZIP 摘要/大小和安装包摘要/大小。开发产物只包含完整平台更新包 `.run` 与 `.sha256`，不含 containerd/nerdctl/runc/CNI/Caddy 二进制，保留 3 天，避免再下载内容重复的 `.tar.gz`；正式 Release 仍发布全部资产。
 
-SSH 只传递少量控制数据和执行器源码，完全不使用 SCP 传包。[控制入口](../distribution/ci/remote-control.py) 创建 root 私有阶段目录，并通过独立 systemd unit 启动 [执行器](../distribution/ci/remote-install.py)。[下载组件](../distribution/ci/delivery.py) 通过 HTTPS 流式下载、断点恢复，验证 ZIP 摘要，再从封闭文件清单安全解包并验证安装包摘要。校验完成后才调用原 `.run --check` 和 `.run --upgrade`，已有节点加 `--skip-apt`，不跳过兼容性、维护排空、备份、业务验证与失败回退。
+SSH 只传递少量控制数据和执行器源码，完全不使用 SCP 传包。[控制入口](../distribution/vendor/deploy-delivery/scripts/remote-control.py) 创建 root 私有阶段目录，并通过独立 systemd unit 启动 [执行器](../distribution/vendor/deploy-delivery/scripts/remote-install.py)。[下载组件](../distribution/vendor/deploy-delivery/scripts/delivery.py) 通过 HTTPS 流式下载、断点恢复，验证 ZIP 摘要，再从封闭文件清单安全解包并验证安装包摘要。校验完成后才调用原 `.run --check` 和 `.run --upgrade`，已有节点加 `--skip-apt`，不跳过兼容性、维护排空、备份、业务验证与失败回退。
 
 下载默认最多 15 分钟，独立下载子进程有硬超时；网络错误最多 4 次尝试，接受 Range 时续传，不支持 Range 时重新写入，禁止拼接错误内容。过期地址通过 `awaiting_url` 请求 CI 刷新，最多 3 次，每次等待最多 90 秒且受总下载时限约束。CI 已断开时无法获取新授权，下载会有界失败，不开始安装。没有后台轮询服务、timer 或新的平台 API。
 
 SSH 断开、管理端重启不影响已接受的 systemd 任务；下载完成后不再需要 CI 在线。独立工作锁覆盖下载和安装，阻止上一个运行端断线后发生重叠部署。控制文件与下载地址不进入命令参数或日志，不把仓库 token 发给服务器。
 
-Actions 等待最多三十分钟，只读查询阶段和下载进度；必要时发送地址刷新控制请求。只在服务器确认安装提交和业务验证通过后报告成功。等待超时或取消 CI 不代表远端取消，必须检查远端状态再重跑。下载失败不会进入安装；安装失败继续使用原恢复流程，不主动终止正在执行的安装器。Actions 部署 job 自身最多 45 分钟，独立远端 unit 不随 job 结束而被杀死。
+Actions 等待最多四十分钟，只读查询阶段和下载进度；必要时发送地址刷新控制请求。只在服务器确认安装提交和业务验证通过后报告成功。等待超时或取消 CI 不代表远端取消，必须检查远端状态再重跑。下载失败不会进入安装；安装失败继续使用原恢复流程，不主动终止正在执行的安装器。Actions 部署 job 自身最多 50 分钟，独立远端 unit 不随 job 结束而被杀死。
 
 从该 Actions 运行 URL 获取 RUNID，重跑次数为 ATTEMPT，例如：
 
@@ -100,3 +100,20 @@ bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-VERSION-linux-ARCH.
 ```
 
 该命令仅操作自身创建的 Docker 测试节点，安装包旁需有对应 `.sha256`；不会复用用户服务器。
+
+## 独立交付工具与基础依赖复用
+
+交付脚本和组件测试的权威来源是私有仓库 [stewardful/deploy-delivery](https://github.com/stewardful/deploy-delivery)。平台提交经过审查的 `distribution/vendor/deploy-delivery/` 源码快照，`deploy-delivery.lock.json` 固定完整提交 SHA 和每个文件的 SHA256；`make installer-test` 首先校验快照，再执行上游交付测试。正常 PR/dev/main 不访问另一个私有仓库，不增加 Secret。不要直接修改快照，先在辅助仓库提交并验证，再显式同步：
+
+```bash
+python3 distribution/ci/vendor-delivery.py sync --source /ABS/deploy-delivery --revision FULL_40_CHARACTER_COMMIT_SHA
+make installer-test
+```
+
+`dev` 使用 `PACKAGE_KIND=platform-update`：完整包含平台 Agent、控制端、Web、安装器、迁移和服务配置，但不下载或打包外部运行时二进制。`.run --check` 只校验更新包自身，不联网；成功不代表基础依赖已准备好或已安装。服务器在持有安装锁时，按清单的版本、架构和锁定摘要补齐依赖，再生成完整候选版本，通过原升级保护后才切换服务。不会在服务器编译平台源码。
+
+已有相同依赖的完整安装版本通过全部文件校验后可直接复用。持久缓存位于 `/var/cache/deploy-platform/dependencies/`，root 私有，按组件、架构和锁清单摘要区分版本，每次复用校验文件清单和摘要；损坏缓存重建，绝不把损坏内容装进候选版本。新安装或缺失依赖时从锁定的 nerdctl/Caddy 官方 GitHub HTTPS 归档下载并验证原始归档 SHA256，提取固定组件，不读取 GitHub 私有 token。依赖下载流式进行，单个归档不超过 512 MiB、最多 3 次尝试，整个依赖准备子进程有 960 秒硬时限；失败发生在维护、数据库备份和服务切换之前。它不是后台下载服务。
+
+首次 dev 安装需要下载上游基础依赖，仍会受 GitHub 网络速度影响；之后同版本依赖无需重复下载。这里复用的是官方已发布的归档和本地校验缓存，不额外维护一份自有基础依赖 Release。缓存不会自动删除，运维可在无安装任务时删除依赖缓存以释放空间，下次按需重建；不要删除 current/releases 或业务数据来清缓存。
+
+`main` 和手动 `make release-build` 默认 `PACKAGE_KIND=offline`，继续生成含全部依赖的 `.run`、`.tar.gz` 和 `.sha256`。离线包无需下载运行时，但操作系统软件包和首次部署业务镜像仍需提前准备或联网。PR 同时构建、校验并在 Ubuntu 24.04/26.04 上安装更新包和离线包；还验证阻断外部 HTTPS 后仍可重复安装，以及真实 SSH/TLS 故障链路。Ubuntu 26.04 还验证离线安装 → 同提交更新包的升级流程，部署真实前后端、PostgreSQL/Redis 和隔离 CA 的 HTTPS，确认数据保留及注入业务故障后的回退；同提交验收不等同于跨历史版本迁移或公网证书验收。Rust crates、Go packages 和前端组件继续编译进平台程序，不拆成每次独立发布的资产。运行时版本变化仍受现有升级兼容性限制，不能通过缓存机制绕过计划迁移要求。

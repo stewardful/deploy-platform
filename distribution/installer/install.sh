@@ -25,6 +25,19 @@ source "$SOURCE/lib/host.sh"
 preflight_host
 exec 9>/run/lock/deploy-platform-install.lock
 flock -n 9 || die 'another installer is running'
+# Validate the update and host before fetching dependencies. Assembly runs under
+# the installer lock, before maintenance, backup or service changes.
+python3 "$SOURCE/lib/archive.py" verify "$SOURCE" --arch "$HOST_ARCH" >/dev/null
+install_dependencies
+timeout --kill-after=5 960 python3 - "$SOURCE" "$HOST_ARCH" <<'PYASSEMBLE'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1])/'lib'))
+import archive
+archive.verify(Path(sys.argv[1]), sys.argv[2])
+import dependencies
+dependencies.materialize(Path(sys.argv[1]))
+PYASSEMBLE
 VERSION=$(python3 "$SOURCE/lib/archive.py" verify "$SOURCE" --arch "$HOST_ARCH")
 python3 "$SOURCE/lib/state.py" recover --source "$SOURCE"
 python3 "$SOURCE/lib/state.py" check
@@ -53,7 +66,6 @@ PY
 fi
 if ip link show cloud0 >/dev/null 2>&1 && [[ ! -f /etc/deploy-platform/install.json ]]; then die 'unmanaged cloud0 bridge exists'; fi
 python3 "$SOURCE/lib/upgrade.py" preflight --source "$SOURCE" --checks-file "$CHECKS_FILE"
-install_dependencies
 WORK=$(mktemp -d /var/tmp/cloud-install.XXXXXXXX)
 trap 'rm -rf -- "$WORK"' EXIT
 args=(); [[ -z $CIDR ]] || args=(--requested "$CIDR")

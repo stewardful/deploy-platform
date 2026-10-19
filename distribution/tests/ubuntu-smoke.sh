@@ -24,10 +24,15 @@ docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2
     --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=1g "$IMAGE" >/dev/null
 docker cp "$INSTALLER" "$NAME:/var/tmp/install.run"
 docker exec "$NAME" bash /var/tmp/install.run --skip-apt
+# Reinstallation must work with external HTTPS blocked: dependencies are reused
+# from the verified installed release/cache, or already bundled offline.
+docker exec "$NAME" iptables -I OUTPUT -p tcp --dport 443 -j REJECT
 BEFORE=$(docker exec "$NAME" sha256sum /etc/deploy-platform/control.token)
 docker exec "$NAME" bash /var/tmp/install.run --skip-apt
 AFTER=$(docker exec "$NAME" sha256sum /etc/deploy-platform/control.token)
 [[ $BEFORE == "$AFTER" ]] || { echo 'reinstall changed the token' >&2; exit 1; }
+docker exec "$NAME" iptables -D OUTPUT -p tcp --dport 443 -j REJECT
+echo 'PASS: reinstall with external HTTPS blocked (no dependency download)'
 if [[ $STATEFUL == 1 ]]; then
     docker exec "$NAME" cloudctl stateful-smoke
 else

@@ -10,9 +10,9 @@ import json
 from pathlib import Path
 import re
 import shutil
-import struct
 import tarfile
 import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("archive", ROOT / "distribution/installer/lib/archive.py")
@@ -20,57 +20,8 @@ archive = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(archive)
 
 
-def check_elf(path, arch):
-    with open(path, "rb") as handle:
-        header = handle.read(20)
-    if len(header) != 20 or header[:6] != b"\x7fELF\x02\x01" or struct.unpack("<H", header[18:20])[0] != {"amd64": 62, "arm64": 183}[arch]:
-        raise ValueError("expected Linux ELF64 " + arch + ": " + str(path))
-
-
-def runtime_subset(source, destination, arch, lock):
-    if archive.digest(source) != lock["archives"][arch]:
-        raise ValueError("official runtime archive checksum mismatch")
-    executables = {"bin/" + name for name in ("containerd", "containerd-shim-runc-v2", "ctr", "nerdctl", "runc")}
-    cni = {"libexec/cni/" + name for name in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning")}
-    selected = set()
-    with tarfile.open(source, "r:gz") as handle:
-        for member in handle:
-            name = member.name.removeprefix("./")
-            if name not in executables | cni and not name.startswith("share/doc/") and name not in ("libexec/cni/LICENSE", "libexec/cni/README.md"):
-                continue
-            name = archive.safe_name(name)
-            if not member.isfile():
-                if member.isdir():
-                    continue
-                raise ValueError("selected runtime file is not regular")
-            if name in selected:
-                raise ValueError("duplicate runtime file")
-            selected.add(name)
-            target = destination / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with handle.extractfile(member) as src, open(target, "xb") as dst:
-                shutil.copyfileobj(src, dst)
-            target.chmod(0o755 if name in executables | cni else 0o644)
-    if not (executables | cni).issubset(selected):
-        raise ValueError("runtime release missing required files")
-    for name in executables | cni:
-        check_elf(destination / name, arch)
-
-
-def proxy_subset(source, destination, arch):
-    lock=json.loads((ROOT / 'distribution/release/proxy.lock.json').read_text())
-    if archive.digest(source)!=lock['archives'][arch]['sha256']:
-        raise ValueError('official Caddy archive checksum mismatch')
-    destination.mkdir(parents=True)
-    with tarfile.open(source,'r:gz') as handle:
-        for name,target in [('caddy',destination/'bin/caddy'),('LICENSE',destination/'LICENSE')]:
-            member=handle.getmember(name)
-            if not member.isfile(): raise ValueError('proxy archive file must be regular')
-            target.parent.mkdir(parents=True,exist_ok=True)
-            with handle.extractfile(member) as src,open(target,'xb') as dst: shutil.copyfileobj(src,dst)
-            target.chmod(0o755 if name=='caddy' else 0o644)
-    check_elf(destination/'bin/caddy',arch)
-    shutil.copyfile(ROOT/'distribution/release/proxy.lock.json',destination/'proxy.lock.json')
+sys.path.insert(0, str(ROOT / 'distribution/installer/lib'))
+from dependencies import check_elf, runtime_subset, proxy_subset
 
 
 def package(args):
@@ -100,8 +51,11 @@ def package(args):
             if path.is_symlink() or not (path.is_file() or path.is_dir()):
                 raise ValueError("Web build has a linked or special file")
         shutil.copytree(web, stage / "web")
-        runtime_subset(Path(args.runtime_archive), stage / "runtime", args.arch, lock)
-        proxy_subset(Path(args.proxy_archive or ROOT / ('target/release-cache/caddy_2.11.7_linux_'+args.arch+'.tar.gz')),stage/'proxy',args.arch)
+        kind = getattr(args, 'kind', 'offline')
+        if kind == 'offline':
+            if not args.runtime_archive: raise ValueError('offline package requires runtime archive')
+            runtime_subset(Path(args.runtime_archive), stage / "runtime", args.arch, lock)
+            proxy_subset(Path(args.proxy_archive or ROOT / ('target/release-cache/caddy_2.11.7_linux_'+args.arch+'.tar.gz')),stage/'proxy',args.arch, json.loads((ROOT/'distribution/release/proxy.lock.json').read_text()))
         shutil.copytree(ROOT / "distribution/installer/lib", stage / "lib", ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copyfile(ROOT / "crates/ingress/bootstrap.json", stage / "lib/proxy-bootstrap.json")
         for name in ("install.sh", "cloudctl", "smoke.py", "stateful_smoke.py", "fullstack_smoke.py"):
@@ -116,7 +70,7 @@ def package(args):
         shutil.copyfile(ROOT / "docs/ingress.md", stage / "INGRESS.md")
         shutil.copyfile(ROOT / "docs/upgrade.md", stage / "UPGRADE.md")
         files = {p.relative_to(stage).as_posix(): archive.digest(p) for p in sorted(stage.rglob("*")) if p.is_file()}
-        manifest = {"schema_version": 1, "version": args.version, "arch": args.arch, "runtime": lock, "proxy": json.loads((ROOT / "distribution/release/proxy.lock.json").read_text()), "compatibility": json.loads((ROOT / "distribution/release/compatibility.json").read_text()), "files": files}
+        manifest = {"schema_version": 1, "package_kind": kind, "version": args.version, "arch": args.arch, "runtime": lock, "proxy": json.loads((ROOT / "distribution/release/proxy.lock.json").read_text()), "compatibility": json.loads((ROOT / "distribution/release/compatibility.json").read_text()), "files": files}
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         archive.verify(stage, args.arch)
         stem = "deploy-platform-" + args.version + "-linux-" + args.arch
@@ -142,7 +96,8 @@ def main():
     p.add_argument("--version", default="0.5.3")
     p.add_argument("--bin-dir", required=True)
     p.add_argument("--web-dir", default=str(ROOT / "apps/web/dist"))
-    p.add_argument("--runtime-archive", required=True)
+    p.add_argument("--runtime-archive")
+    p.add_argument("--kind", choices=("offline", "platform-update"), default="offline")
     p.add_argument("--proxy-archive")
     p.add_argument("--output", default=str(ROOT / "target/dist"))
     package(p.parse_args())

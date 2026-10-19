@@ -7,9 +7,9 @@ from pathlib import Path
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'ci'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'vendor/deploy-delivery/scripts'))
 import delivery
-spec = importlib.util.spec_from_file_location('artifact_request', Path(__file__).resolve().parents[1]/'ci/artifact-request.py')
+spec = importlib.util.spec_from_file_location('artifact_request', Path(__file__).resolve().parents[1]/'vendor/deploy-delivery/scripts/artifact-request.py')
 provider = importlib.util.module_from_spec(spec);spec.loader.exec_module(provider)
 
 

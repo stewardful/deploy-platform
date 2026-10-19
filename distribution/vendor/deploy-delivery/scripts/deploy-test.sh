@@ -2,7 +2,7 @@
 # GitHub runner transport only. Never embed Secrets in remote command strings.
 set -Eeuo pipefail
 umask 077
-ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 : "${TEST_SSH_PRIVATE_KEY:?Set TEST_SSH_PRIVATE_KEY in GitHub Secrets}"
 : "${TEST_SSH_KNOWN_HOSTS:?Set verified TEST_SSH_KNOWN_HOSTS in GitHub Secrets}"
 : "${TEST_SERVER_HOST:?Set TEST_SERVER_HOST in GitHub Secrets}"
@@ -33,7 +33,7 @@ ssh-keygen -y -P '' -f "$work/key" >/dev/null
 ssh-keygen -l -f "$work/known_hosts" >/dev/null
 export CI_ARTIFACT_DIR TEST_SERVER_ARCH
 # This metadata file has no credentials. URL issuance happens only after host preflight.
-python3 "$ROOT/distribution/ci/artifact-request.py" prepare "$work/request.json"
+python3 "$ROOT/scripts/artifact-request.py" prepare "$work/request.json"
 options=(-F /dev/null -i "$work/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$work/known_hosts" -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
 destination=$TEST_SERVER_USER@$TEST_SERVER_HOST
 ssh_control() { env -u GH_TOKEN -u GITHUB_TOKEN ssh "${options[@]}" -p "$TEST_SERVER_PORT" "$destination" "$@"; }
@@ -41,7 +41,7 @@ run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
 stage=/var/tmp/deploy-platform-ci-$run
 printf '%s\n' 'Checking server OS, architecture, systemd, cgroup and sudo before HTTPS delivery'
 {
-cat "$ROOT/distribution/installer/lib/os.sh"
+cat "$ROOT/scripts/os.sh"
 cat <<'PREPARE'
 set -Eeuo pipefail
 umask 077
@@ -59,14 +59,14 @@ printf 'PASS: supported OS and architecture %s; HTTPS download can begin\n' "$ar
 : # The root control entry point creates its own private stage after validation.
 PREPARE
 } | ssh_control bash -s -- "$run" "$TEST_SERVER_ARCH"
-control_command=$(python3 - "$ROOT/distribution/ci/remote-control.py" <<'PYCONTROL'
+control_command=$(python3 - "$ROOT/scripts/remote-control.py" <<'PYCONTROL'
 from pathlib import Path
 import shlex,sys
 print('sudo -n python3 -c '+shlex.quote(Path(sys.argv[1]).read_text()))
 PYCONTROL
 )
 # The bootstrap contains only small control metadata and downloader source, never installer bytes.
-python3 "$ROOT/distribution/ci/artifact-request.py" authorize "$work/request.json" > "$work/control.json"
+python3 "$ROOT/scripts/artifact-request.py" authorize "$work/request.json" > "$work/control.json"
 ssh_control "$control_command start" < "$work/control.json"
 rm -f "$work/control.json"
 last_progress='' revision=1
@@ -82,7 +82,7 @@ while (( SECONDS < end )); do
                 if (( requested < revision )); then sleep 1; continue; fi
                 revision=$((requested+1))
                 if (( revision > 4 )); then echo 'Download authorization refresh limit exceeded; inspect remote result' >&2; exit 1; fi
-                URL_REVISION=$revision python3 "$ROOT/distribution/ci/artifact-request.py" authorize "$work/request.json" > "$work/control.json"
+                URL_REVISION=$revision python3 "$ROOT/scripts/artifact-request.py" authorize "$work/request.json" > "$work/control.json"
                 ssh_control "$control_command refresh" < "$work/control.json"
                 rm -f "$work/control.json";;
             succeeded)

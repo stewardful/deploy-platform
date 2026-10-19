@@ -100,18 +100,18 @@ chmod 0700 "$work/bin/python3"
 export PATH="$work/bin:$PATH" CI_FIXTURE_REQUEST_FILE="$work/request.json"
 export CI_FIXTURE_MODE=corrupt
 wrong="[127.0.0.1]:$TEST_SERVER_PORT $(cat "$work/key.pub")"
-if TEST_SSH_KNOWN_HOSTS="$wrong" bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/wrong-host.log" 2>&1; then
+if TEST_SSH_KNOWN_HOSTS="$wrong" bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/wrong-host.log" 2>&1; then
     echo 'wrong host key was accepted' >&2; exit 1
 fi
 docker exec "$NAME" test ! -e /etc/deploy-platform/install.json
 echo 'PASS: wrong SSH host key refused before download/installation'
-if bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/corrupt.log" 2>&1; then echo 'corrupt artifact was installed' >&2; exit 1; fi
+if bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/corrupt.log" 2>&1; then echo 'corrupt artifact was installed' >&2; exit 1; fi
 docker exec "$NAME" test ! -e /etc/deploy-platform/install.json
 docker exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="archive_digest_mismatch"' "/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-1/result.json"
 echo 'PASS: corrupt HTTPS archive rejected before installation'
 GITHUB_RUN_ATTEMPT=2 CI_FIXTURE_MODE=resume-expired
 export GITHUB_RUN_ATTEMPT CI_FIXTURE_MODE
-if ! bash "$ROOT/distribution/ci/deploy-test.sh"; then
+if ! bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh"; then
     docker exec "$NAME" journalctl -u "deploy-platform-ci-$GITHUB_RUN_ID-2" -n 40 --no-pager
     exit 1
 fi
@@ -120,7 +120,7 @@ echo 'PASS: expired URL refreshed, interrupted HTTPS resumed, verified first ins
 # A second accepted deployment must finish even if the Actions runner disconnects.
 GITHUB_RUN_ATTEMPT=3 CI_FIXTURE_MODE=slow
 export GITHUB_RUN_ATTEMPT CI_FIXTURE_MODE
-bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/disconnected.log" 2>&1 &
+bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/disconnected.log" 2>&1 &
 runner_pid=$!
 stage=/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-3
 started=0
@@ -135,7 +135,7 @@ runner_pid=''
 # Concurrent delivery must fail without touching an already accepted installation.
 GITHUB_RUN_ATTEMPT=4
 export GITHUB_RUN_ATTEMPT
-if bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/busy.log" 2>&1; then echo 'concurrent delivery unexpectedly accepted' >&2; exit 1; fi
+if bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/busy.log" 2>&1; then echo 'concurrent delivery unexpectedly accepted' >&2; exit 1; fi
 docker exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="deployment_busy"' "/var/tmp/deploy-platform-ci-$GITHUB_RUN_ID-4/result.json"
 echo 'PASS: parallel delivery rejected by independent worker lock'
 finished=0

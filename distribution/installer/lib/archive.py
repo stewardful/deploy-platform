@@ -90,6 +90,26 @@ def verify(directory, expected_arch=None):
     if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,5,2):
         required.update({'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path'})
     required.update("runtime/libexec/cni/" + name for name in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning"))
+    kind = manifest.get('package_kind', 'offline')
+    if kind not in ('offline', 'platform-update'):
+        raise ValueError('unsupported package kind')
+    if kind == 'platform-update':
+        if any(name.startswith(('runtime/', 'proxy/')) for name in actual):
+            raise ValueError('platform update must not embed dependency files')
+        required = {name for name in required if not name.startswith(('runtime/', 'proxy/'))}
+        required.update({'lib/dependencies.py', 'runtime.lock.json'})
+        for key in ('runtime', 'proxy'):
+            lock = manifest.get(key)
+            if not isinstance(lock, dict) or not isinstance(lock.get('archives'), dict):
+                raise ValueError('missing dependency lock')
+            expected = lock['archives'].get(manifest['arch'])
+            if key == 'proxy' and isinstance(expected, dict): expected = expected.get('sha256')
+            if not isinstance(expected, str) or not re.fullmatch('[a-f0-9]{64}', expected):
+                raise ValueError('invalid dependency digest')
+            if '{arch}' not in lock.get('archive_url_template', ''):
+                raise ValueError('invalid dependency URL template')
+        if json.loads((root/'runtime.lock.json').read_text()) != manifest['runtime']:
+            raise ValueError('runtime lock differs from manifest')
     if not required.issubset(actual):
         raise ValueError("release is missing application or runtime components")
     for name, expected in hashes.items():
