@@ -44,7 +44,7 @@ Node and updates:
   system-logs SERVICE          agent | control | runtime | proxy | update
   update check | status        Stable Release discovery / shared update task status
   upgrade --version X.Y.Z --yes   Queue the checked stable Release
-  upgrade-dev --run-id ID [--yes] Preview / queue a pinned dev Actions build
+  upgrade-dev [--run-id ID] [--yes] Latest successful dev build, or a specific run
 
 Advanced:
   token                        Print private Web login token (sudo)

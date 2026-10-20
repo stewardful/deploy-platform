@@ -70,7 +70,9 @@ sudo cat /var/lib/deploy-platform/updates/result.json
 
 命令行正式升级复用上述 API 和 worker：`cloudctl update check` 后显式运行 `cloudctl upgrade --version X.Y.Z --yes`。查询执行结果用 `cloudctl update status`，该查询不依赖正在重启的控制端。应用操作、平台升级和业务应用发布的边界见 [命令指南](commands.md)。
 
-`cloudctl upgrade-dev --run-id RUN_ID` 只展示该构建的固定元数据；加 `--yes` 才排队。私有仓库需要服务器配置的 token 对该仓库有 **Actions: read** 权限；正式版 Contents 只读权限不足以下载 Actions 产物。凭据仍从现有私有文件读取，不能传在命令行、日志或网页参数中。
+`cloudctl upgrade-dev` 默认查找最新通过构建和测试且产物可用的 dev 构建，只展示固定元数据；`cloudctl upgrade-dev --yes` 选择并提交当前最新候选。保留 `--run-id RUN_ID` 指定某次构建；指定模式失败时不会自动选择其他构建。私有仓库需要服务器配置的 token 对该仓库有 **Actions: read** 权限；正式版 Contents 只读权限不足以下载 Actions 产物。凭据仍从现有私有文件读取，不能传在命令行、日志或网页参数中。
+
+默认查询最多最近 100 个已结束运行，按工作流构建序号从新到旧筛选；旧构建重跑不会因此成为最新。跳过不合格来源、测试失败、产物缺失/过期/架构不符的候选；鉴权失败、限流、网络或元数据响应损坏时直接中止，不把 API 故障当作无效候选。没有可用构建时失败，可用 `--run-id` 查询搜索范围以外的构建。无编号预览和确认是独立查询，需要与预览完全一致时显式传回运行编号；入队后始终固定该构建，执行时只重新核对它，不重新选择最新版本。
 
 dev 来源固定为配置仓库的 `.github/workflows/dev-deploy.yml`、`dev` 分支、push/workflow_dispatch，拒绝 PR、fork 和其他工作流。运行必须结束，且 `build / test` 与对应架构的 package 任务成功；若只是最后 SSH 部署失败，仍可手动拉取已验证的构建。必须存在唯一、未过期、架构匹配的 `deploy-platform-linux-ARCH` 产物，包含 `.run` 与 `.sha256`。GitHub 产物保留期目前三天，过期后需重新构建，不能靠运行编号恢复过期文件。初版按一次至多 100 条任务/产物检查，超出造成目标缺失时拒绝安装。
 

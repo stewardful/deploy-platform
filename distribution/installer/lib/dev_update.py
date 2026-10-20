@@ -13,6 +13,12 @@ import update_worker as worker
 import delivery
 
 WORKFLOW = '.github/workflows/dev-deploy.yml'
+MAX_RECENT_RUNS = 100
+RUNS_PER_PAGE = 20
+
+
+class CandidateUnavailable(ValueError):
+    """A run is not an installable candidate; transport/auth failures are not candidates."""
 
 
 class Redirect(worker.AssetRedirect):
@@ -38,30 +44,50 @@ def metadata(repo, token, path):
     return json.loads(data)
 
 
-def discover(run_id):
-    if not isinstance(run_id, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', run_id): raise ValueError('invalid run ID')
+def discover(run_id=None):
+    if run_id is not None and (not isinstance(run_id, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', run_id)):
+        raise ValueError('invalid run ID')
     repo, token = worker.settings()
     current = json.loads(worker.CURRENT.read_text())
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
     if arch is None or current['arch'] != arch: raise ValueError('node architecture mismatch')
-    run = metadata(repo, token, 'actions/runs/'+run_id)
+    if run_id is not None:
+        return candidate(repo, token, arch, run_id, metadata(repo, token, 'actions/runs/'+run_id))
+    # Small pages keep GitHub's rich run metadata below the existing response cap.
+    for page in range(1, MAX_RECENT_RUNS // RUNS_PER_PAGE + 1):
+        response = metadata(repo, token, 'actions/workflows/dev-deploy.yml/runs?branch=dev&status=completed&per_page='+str(RUNS_PER_PAGE)+'&page='+str(page))
+        runs = response.get('workflow_runs') if isinstance(response, dict) else None
+        if not isinstance(runs, list) or len(runs) > RUNS_PER_PAGE:
+            raise ValueError('invalid workflow run listing')
+        # GitHub lists newest created runs first. run_number orders source builds;
+        # completion/update times of reruns must not override that order.
+        if any(not isinstance(run, dict) or type(run.get('run_number')) is not int or run['run_number'] <= 0 or
+               type(run.get('id')) is not int or not 0 < run['id'] < 10**20 for run in runs):
+            raise ValueError('invalid workflow run identity')
+        for run in sorted(runs, key=lambda item: item['run_number'], reverse=True):
+            try:
+                return candidate(repo, token, arch, str(run['id']), run)
+            except CandidateUnavailable:
+                continue
+            except urllib.error.HTTPError as error:
+                # A deleted run/artifact is unavailable. Auth, rate limits, network
+                # and malformed responses must abort rather than select older code.
+                if error.code not in (404, 410): raise
+        if len(runs) < RUNS_PER_PAGE: break
+    raise ValueError('no installable dev build in the latest 100 completed runs; specify --run-id for an older build')
+
+
+def candidate(repo, token, arch, run_id, run):
     # Workflow and source repository are pinned; PRs, forks and other workflows cannot be installed.
     if (str(run.get('id')) != run_id or run.get('path') != WORKFLOW or
             run.get('event') not in ('push', 'workflow_dispatch') or run.get('head_branch') != 'dev' or
             run.get('repository', {}).get('full_name') != repo or run.get('head_repository', {}).get('full_name') != repo or
             not re.fullmatch(r'[a-f0-9]{40}', run.get('head_sha', '')) or
             run.get('status') != 'completed' or run.get('conclusion') not in ('success', 'failure')):
-        raise ValueError('completed trusted dev workflow required')
-    # A failed SSH deployment may still have a good build. Require the reusable build/test
-    # jobs to have succeeded, independently of the deployment job's conclusion.
-    jobs = metadata(repo, token, 'actions/runs/'+run_id+'/jobs?per_page=100')['jobs']
-    required = ('build / test', 'build / package (ubuntu-24.04'+('-arm' if arch == 'arm64' else '')+', '+arch+')')
-    for name in required:
-        matches = [job for job in jobs if job.get('name') == name]
-        if len(matches) != 1 or matches[0].get('conclusion') != 'success': raise ValueError('successful build and tests required')
+        raise CandidateUnavailable('completed trusted dev workflow required')
     artifacts = metadata(repo, token, 'actions/runs/'+run_id+'/artifacts?per_page=100')['artifacts']
     matches = [a for a in artifacts if a.get('name') == 'deploy-platform-linux-'+arch]
-    if len(matches) != 1: raise ValueError('artifact missing or ambiguous')
+    if len(matches) != 1: raise CandidateUnavailable('artifact missing or ambiguous')
     item = matches[0]
     origin = item.get('workflow_run', {})
     if (item.get('expired') is not False or str(origin.get('id')) != run_id or origin.get('head_sha') != run['head_sha'] or
@@ -69,7 +95,14 @@ def discover(run_id):
             origin.get('head_repository_id') != run['repository'].get('id') or type(item.get('id')) is not int or item['id'] <= 0 or
             type(item.get('size_in_bytes')) is not int or not 0 < item['size_in_bytes'] <= worker.MAX_INSTALLER or
             not re.fullmatch(r'sha256:[a-f0-9]{64}', item.get('digest', ''))):
-        raise ValueError('artifact identity mismatch')
+        raise CandidateUnavailable('artifact identity mismatch')
+    # A failed SSH deployment may still have a good build. Require the reusable build/test
+    # jobs to have succeeded, independently of the deployment job's conclusion.
+    jobs = metadata(repo, token, 'actions/runs/'+run_id+'/jobs?per_page=100')['jobs']
+    required = ('build / test', 'build / package (ubuntu-24.04'+('-arm' if arch == 'arm64' else '')+', '+arch+')')
+    for name in required:
+        matches = [job for job in jobs if job.get('name') == name]
+        if len(matches) != 1 or matches[0].get('conclusion') != 'success': raise CandidateUnavailable('successful build and tests required')
     return {'channel': 'dev', 'repository': repo, 'run_id': run_id, 'commit': run['head_sha'],
             'arch': arch, 'artifact_id': item['id'], 'size': item['size_in_bytes'], 'digest': item['digest']}
 

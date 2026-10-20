@@ -62,15 +62,20 @@ sudo cloudctl system-logs update
 
 先检查，审核返回的候选版本，再显式提交准确版本。`upgrade` 只接受最近检查过的正式 Release，不安装 dev、alpha/beta 或任意 URL。需要控制端运行且配置更新功能；没有正式 Release、凭据无效或缺少产物会失败，不会假装升级成功。任务提交成功只表示排队。
 
-dev 使用独立命令，准确选择 GitHub Actions 的 dev 工作流运行编号：
+dev 使用独立命令，默认选择最新通过构建和测试、产物可用且架构匹配的 dev 构建，也可以指定 GitHub Actions 运行编号：
 
 ```bash
-# 只核对构建和产物，不下载、不排队
+# 查看最新可用 dev 构建，不下载、不排队
+sudo cloudctl upgrade-dev
+# 选择并提交当前最新可用构建
+sudo cloudctl upgrade-dev --yes
+# 指定构建；也适用于审核后锁定预览中返回的运行编号
 sudo cloudctl upgrade-dev --run-id 123456789
-# 审核后批准同一个构建
 sudo cloudctl upgrade-dev --run-id 123456789 --yes
 sudo cloudctl update status
 ```
+
+`upgrade-dev` 最多搜索最近 100 个已结束的 dev 工作流，按构建序号而非重跑完成时间排序。无可用候选时失败；指定 `--run-id` 时不搜索、不回退到其他构建。鉴权、限流、网络或响应损坏会中止搜索。无编号的预览与 `--yes` 是两次独立查询；要批准与预览完全相同的构建，请把返回的 `run_id` 传给 `--run-id`。任务入队后已固定运行编号、提交及产物身份，执行器不会再次选择“最新”。
 
 `upgrade-dev` 直接读取已配置仓库的 GitHub Actions 元数据，不依赖 Go 控制端，也不需要服务器另装 deploy-delivery。它复用平台更新 path/service，按需执行，无新增常驻服务或轮询。它只更新平台，不更新业务应用镜像。当前没有独立 alpha/beta 发布通道，不用这些名字代指 dev。
 
