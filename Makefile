@@ -65,7 +65,8 @@ web-e2e: web-build go-build
 installer-test:
 	python3 -B distribution/ci/vendor-delivery.py check
 	python3 -B -m unittest discover -s distribution/vendor/deploy-delivery/tests -v
-	python3 -m unittest discover -s tests/installer -v
+	# Keep imported pinned vendor sources immutable on Linux as well as macOS.
+	python3 -B -m unittest discover -s tests/installer -v
 	$(MAKE) installer-check
 
 installer-check:
