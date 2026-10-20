@@ -68,3 +68,21 @@ class NodeCliTests(unittest.TestCase):
             cli.main(['deploy', '--help'])
         self.assertIn('Usage: cloudctl deploy', output.getvalue())
         self.assertNotIn('agentctl apply', output.getvalue())
+
+    def test_upgrade_acceptance_command_is_accepted_by_real_cli(self):
+        # Parse the literal command used by the isolated upgrade harness, then run
+        # its real help path. No containers, API writes or host services are needed.
+        import ast
+        import subprocess
+        root = Path(__file__).resolve().parents[2]
+        tree = ast.parse((root/'distribution/tests/upgrade-runtime.py').read_text())
+        commands = []
+        for call in ast.walk(tree):
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'system':
+                if all(isinstance(arg, ast.Constant) and isinstance(arg.value, str) for arg in call.args):
+                    args = [arg.value for arg in call.args]
+                    if args[:1] == ['cloudctl'] and '--keep-running' in args: commands.append(args)
+        self.assertEqual(len(commands), 1)
+        result = subprocess.run([sys.executable, '-I', '-B', str(root/'distribution/installer/lib/node_cli.py'), *commands[0][1:], '--help'], capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--image', result.stdout)
