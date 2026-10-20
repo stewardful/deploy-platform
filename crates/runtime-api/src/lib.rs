@@ -52,7 +52,7 @@ pub struct ContainerStatus {
     pub app: AppKey,
     pub state: ContainerState,
     pub exit_code: Option<i32>,
-    /// Configuration label assigned at create time. None for legacy containers.
+    /// Configuration label assigned at create time. None when the runtime does not expose the label.
     pub spec_fingerprint: Option<String>,
 }
 

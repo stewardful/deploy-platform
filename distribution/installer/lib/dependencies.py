@@ -140,17 +140,13 @@ def cached_valid(entry):
 def materialize(source, *, current=Path('/opt/deploy-platform/current'), cache=Path('/var/cache/deploy-platform/dependencies'), downloader=fetch):
     source, current, cache = Path(source), Path(current), Path(cache)
     manifest = archive.verify(source)
-    if manifest.get('package_kind', 'offline') == 'offline': return manifest
+    if manifest['package_kind'] == 'offline': return manifest
     # SOURCE is an extracted, authenticated update payload; no host services are
     # changed until the assembled full inventory passes the existing installer.
     old = None
     try:
         old = archive.verify(current, manifest['arch'])
-        if old.get('package_kind', 'offline') != 'offline': old = None
-        elif 'proxy' not in old:
-            # Historical releases pin Caddy in an inventoried file rather than
-            # a top-level manifest field (same compatibility rule as upgrader).
-            old['proxy'] = json.loads((current/'proxy/proxy.lock.json').read_text())
+        if old['package_kind'] != 'offline': old = None
     except (OSError, ValueError): pass
     if cache.is_symlink() or cache.parent.is_symlink(): raise ValueError('linked dependency cache')
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)

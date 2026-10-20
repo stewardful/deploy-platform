@@ -16,6 +16,26 @@ MAX_BYTES = 2 * 1024**3
 MAX_FILES = 5000
 
 
+class UpgradeError(ValueError):
+    """Safe operator-facing message; never include response bodies or credentials."""
+
+
+def contract(manifest):
+    value = manifest.get('compatibility')
+    if not isinstance(value, dict):
+        raise UpgradeError('release is missing a valid compatibility contract')
+    if value.get('schema_version') != 1 or value.get('agent_api') != 'v1' or value.get('paths_revision') != 1:
+        raise UpgradeError('unsupported compatibility contract')
+    if not isinstance(value.get('state'), dict) or set(value['state']) != {'agent', 'ingress'}:
+        raise UpgradeError('incomplete state compatibility contract')
+    for rule in value['state'].values():
+        if not isinstance(rule, dict) or set(rule) != {'read_min', 'read_max', 'write'} or any(type(n) is not int for n in rule.values()):
+            raise UpgradeError('invalid schema contract')
+        if not 0 <= rule['read_min'] <= rule['write'] <= rule['read_max']:
+            raise UpgradeError('invalid schema range')
+    return value
+
+
 def digest(path):
     h = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -104,18 +124,14 @@ def verify(directory, expected_arch=None):
     if actual != set(hashes):
         raise ValueError("release inventory mismatch")
     required = {"bin/agentd", "bin/agentctl", "bin/controld", "web/index.html", "runtime/bin/containerd", "runtime/bin/containerd-shim-runc-v2", "runtime/bin/runc", "runtime/bin/nerdctl", "runtime/bin/ctr"}
-    # Historical 0.1-0.3 bundles remain verifiable for installer rollback.
-    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,4,0):
-        required.update({'proxy/bin/caddy','proxy/LICENSE','proxy/proxy.lock.json','systemd/deploy-proxy.service'})
-    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,5,1):
-        required.update({'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py'})
-        policy = manifest.get('compatibility')
-        if not isinstance(policy, dict) or policy.get('schema_version') != 1 or not isinstance(policy.get('state'), dict):
-            raise ValueError('release missing upgrade compatibility contract')
-    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,5,2):
-        required.update({'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path'})
+    required.update({'proxy/bin/caddy', 'proxy/LICENSE', 'proxy/proxy.lock.json', 'systemd/deploy-proxy.service',
+                     'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py',
+                     'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path'})
+    contract(manifest)
+    if not all(isinstance(manifest.get(key), dict) for key in ('runtime', 'proxy')):
+        raise ValueError('release missing dependency locks')
     required.update("runtime/libexec/cni/" + name for name in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning"))
-    kind = manifest.get('package_kind', 'offline')
+    kind = manifest.get('package_kind')
     if kind not in ('offline', 'platform-update'):
         raise ValueError('unsupported package kind')
     if kind == 'platform-update':

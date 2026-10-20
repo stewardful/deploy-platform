@@ -66,23 +66,24 @@ impl SqliteStore {
             let version: u32 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .map_err(unavailable)?;
-            if version > 3 {
-                return Err(StoreError::InvalidState);
-            }
-            if version == 0 {
-                connection
-                    .execute_batch(include_str!("../migrations/001_initial.sql"))
-                    .map_err(unavailable)?;
-            }
-            if version < 2 {
-                connection
-                    .execute_batch(include_str!("../migrations/002_recovery.sql"))
-                    .map_err(unavailable)?;
-            }
-            if version < 3 {
-                connection
-                    .execute_batch(include_str!("../migrations/003_api_jobs.sql"))
-                    .map_err(unavailable)?;
+            match version {
+                0 => {
+                    let objects: u32 = connection
+                        .query_row(
+                            "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .map_err(unavailable)?;
+                    if objects != 0 {
+                        return Err(StoreError::InvalidState);
+                    }
+                    connection
+                        .execute_batch(include_str!("../schema.sql"))
+                        .map_err(unavailable)?;
+                }
+                3 => {}
+                _ => return Err(StoreError::InvalidState),
             }
             let existing: Option<String> = connection
                 .query_row(

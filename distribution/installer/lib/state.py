@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import stat
 import tempfile
 import subprocess
 
@@ -71,17 +70,8 @@ def recover(source):
     if value.get('stage') == 'draining':
         # No services/files have been changed yet. Never cancel an accepted job
         # merely because draining or a pre-activation business check timed out.
-        from agent_http import request, AgentError
-        gated = Path('/run/deploy-platform/agent.sock.upgrade')
-        original = Path('/run/deploy-platform/agent.sock')
-        if gated.exists():
-            if original.exists() or not stat.S_ISSOCK(gated.lstat().st_mode):
-                raise ValueError('cannot restore legacy socket safely')
-            gated.rename(original)
-        else:
-            try: request('/v1/maintenance/exit', 'POST')
-            except AgentError as error:
-                if error.status != 404: raise
+        from agent_http import request
+        request('/v1/maintenance/exit', 'POST')
         cleanup_upgrade()
         path.unlink()
         print('[cloud] drain aborted; old Agent resumed without cancelling deployments', flush=True)
@@ -138,11 +128,6 @@ def cleanup_upgrade():
     if marker.is_symlink():
         raise ValueError('linked upgrade marker')
     marker.unlink(missing_ok=True)
-    socket = Path('/run/deploy-platform/agent.sock.upgrade')
-    if socket.exists():
-        if not stat.S_ISSOCK(socket.lstat().st_mode):
-            raise ValueError('unexpected upgrade socket file')
-        socket.unlink()
 
 
 def commit():

@@ -52,13 +52,16 @@ class ArchiveTests(unittest.TestCase):
             required = ["bin/agentd", "bin/agentctl", "bin/controld", "web/index.html"]
             required += ["runtime/bin/" + n for n in ("containerd", "containerd-shim-runc-v2", "ctr", "nerdctl", "runc")]
             required += ["runtime/libexec/cni/" + n for n in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning")]
+            required += ['proxy/bin/caddy', 'proxy/LICENSE', 'proxy/proxy.lock.json', 'systemd/deploy-proxy.service',
+                         'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py',
+                         'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path']
             for name in required:
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"fixture")
-            value = {"schema_version": 1, "version": "0.1.0", "arch": "arm64", "files": {n: archive.digest(root / n) for n in required}}
+            value = {"schema_version": 1, "version": "0.5.3", "arch": "arm64", "package_kind": "offline", "runtime": {}, "proxy": {}, "compatibility": json.loads((ROOT/'distribution/release/compatibility.json').read_text()), "files": {n: archive.digest(root / n) for n in required}}
             (root / "manifest.json").write_text(json.dumps(value))
-            self.assertEqual(archive.verify(root, "arm64")["version"], "0.1.0")
+            self.assertEqual(archive.verify(root, "arm64")["version"], "0.5.3")
             with self.assertRaises(ValueError): archive.verify(root, "amd64")
             (root / "bin/agentctl").write_bytes(b"tampered")
             with self.assertRaisesRegex(ValueError, "checksum"): archive.verify(root)

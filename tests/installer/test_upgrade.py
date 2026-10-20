@@ -19,15 +19,14 @@ import state as transaction
 POLICY = json.loads((ROOT / 'distribution/release/compatibility.json').read_text())
 
 
-def manifest(version='0.5.0'):
+def manifest(version='0.5.3'):
     return {'version': version, 'arch': 'arm64', 'runtime': {'fixed': 'same'}, 'compatibility': copy.deepcopy(POLICY)}
 
 
 def databases(root):
     (root / 'ingress').mkdir()
     with sqlite3.connect(root / 'agent.sqlite') as db:
-        for name in ('001_initial.sql', '002_recovery.sql', '003_api_jobs.sql'):
-            db.executescript((ROOT / 'crates/agent-store-sqlite/migrations' / name).read_text())
+        db.executescript((ROOT / 'crates/agent-store-sqlite/schema.sql').read_text())
     with sqlite3.connect(root / 'ingress/ingress.sqlite') as db:
         db.executescript('CREATE TABLE meta(id INTEGER PRIMARY KEY,revision INTEGER); INSERT INTO meta VALUES(1,0); CREATE TABLE routes(domain TEXT,revision INTEGER,spec TEXT);')
 
@@ -41,22 +40,21 @@ class CompatibilityTests(unittest.TestCase):
 
     def test_same_layout_upgrade_preserves_existing_databases(self):
         before = state.logical_state(self.root)
-        self.assertEqual(state.check(manifest(), manifest('0.5.1'), self.root), POLICY)
+        self.assertEqual(state.check(manifest(), manifest('0.5.4'), self.root), POLICY)
         self.assertEqual(state.logical_state(self.root), before)
 
-    def test_rejects_runtime_architecture_downgrade_and_unknown_legacy(self):
+    def test_rejects_runtime_architecture_downgrade_and_missing_contract(self):
         for key, value in [('runtime', {'fixed': 'different'}), ('arch', 'amd64'), ('proxy', {'version': 'changed'}), ('version', '0.4.1')]:
-            candidate = manifest('0.5.1'); candidate[key] = value
+            candidate = manifest('0.5.4'); candidate[key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
                 state.check(manifest(), candidate, self.root)
-        old = manifest('0.3.0'); del old['compatibility']
-        with self.assertRaisesRegex(ValueError, 'known compatibility'):
-            state.check(old, manifest(), self.root)
-        legacy = manifest(); del legacy['compatibility']
-        self.assertEqual(state.check(legacy, manifest('0.5.1'), self.root), POLICY)
+        for version in ('0.3.0', '0.4.1', '0.5.0', '0.5.3'):
+            old = manifest(version); del old['compatibility']
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'valid compatibility'):
+                state.check(old, manifest('0.5.4'), self.root)
 
     def test_schema_that_breaks_rollback_is_rejected_before_live_migration(self):
-        candidate = manifest('0.5.1')
+        candidate = manifest('0.5.4')
         candidate['compatibility']['state']['agent'].update(read_max=4, write=4)
         with self.assertRaisesRegex(ValueError, 'rollback release'):
             state.check(manifest(), candidate, self.root)
@@ -164,23 +162,27 @@ class DrainTests(unittest.TestCase):
             with self.assertRaises(TimeoutError): upgrade.drain(10)
             self.assertTrue(upgrade.MARKER.exists())
 
-    def test_legacy_hides_socket_then_waits_for_existing_requests_and_jobs(self):
-        with tempfile.TemporaryDirectory() as temp:
-            socket = Path(temp) / 'agent.sock'; socket.write_text('fake socket')
-            with patch.object(upgrade, 'MARKER', Path(temp) / 'marker'), patch.object(upgrade, 'SOCKET', str(socket)), \
-                 patch.object(upgrade, 'GATED_SOCKET', str(socket) + '.upgrade'), \
-                 patch.object(upgrade, 'request', side_effect=upgrade.AgentError(404)), \
-                 patch.object(upgrade.stat, 'S_ISSOCK', return_value=True), \
-                 patch.object(state, 'pending', side_effect=[1, 0, 0]), \
-                 patch.object(upgrade.time, 'monotonic', side_effect=[0, 1, 2, 9]), patch.object(upgrade.time, 'sleep'):
-                upgrade.drain(10)
-            self.assertFalse(socket.exists())
-            self.assertTrue(Path(str(socket) + '.upgrade').exists())
+    def test_unsupported_or_failed_maintenance_api_aborts_without_socket_fallback(self):
+        import agent_http
+        for status in (404, 503):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temp, \
+                 patch.object(upgrade, 'MARKER', Path(temp) / 'marker'), \
+                 patch.object(upgrade, 'request', side_effect=agent_http.AgentError(status)) as request:
+                with self.assertRaises(agent_http.AgentError): upgrade.drain(10)
+                request.assert_called_once_with('/v1/maintenance/enter', 'POST')
 
-    def test_transport_or_503_never_silently_uses_legacy_fallback(self):
-        with tempfile.TemporaryDirectory() as temp, patch.object(upgrade, 'MARKER', Path(temp) / 'marker'), \
-             patch.object(upgrade, 'request', side_effect=upgrade.AgentError(503)):
-            with self.assertRaises(upgrade.AgentError): upgrade.drain(10)
+    def test_failed_gate_exit_keeps_transaction_for_recovery(self):
+        import agent_http
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); (root / 'snapshot.json').write_text('[]')
+            journal = root / 'transaction.json'
+            journal.write_text(json.dumps({'backup': str(root), 'previous': '/opt/deploy-platform/releases/current', 'active': [], 'stage': 'draining'}))
+            with patch.object(transaction, 'BACKUP_ROOT', root.parent), patch.object(transaction, 'TRANSACTION', str(journal)), \
+                 patch.object(agent_http, 'request', side_effect=agent_http.AgentError(404)), \
+                 patch.object(transaction, 'cleanup_upgrade') as cleanup:
+                with self.assertRaises(agent_http.AgentError): transaction.recover('unused')
+                cleanup.assert_not_called()
+            self.assertTrue(journal.exists())
 
 
 SPEC = {'app': {'project': 'demo', 'name': 'frontend'}, 'ports': [{'host': 18080, 'container': 8080}]}
@@ -191,9 +193,9 @@ PROBE = {'project': 'demo', 'url': 'https://app.your-domain.com/api/upgrade-chec
 class ProbeTests(unittest.TestCase):
     def test_missing_secret_or_inconsistent_volume_reference_blocks_capture(self):
         spec = dict(SPEC, secrets=[{'name': 'password'}], volumes=[{'name': 'data', 'target': '/data'}])
-        with patch.object(upgrade, 'agent', return_value=[]), self.assertRaisesRegex(ValueError, 'secret reference'):
+        with patch.object(upgrade, 'request', return_value=[]), self.assertRaisesRegex(ValueError, 'secret reference'):
             upgrade.validate_resource_refs([spec])
-        with patch.object(upgrade, 'agent', side_effect=[[{'name': 'password'}], [{'name': 'data', 'target': '/wrong', 'uid': 0, 'gid': 0}]]), self.assertRaisesRegex(ValueError, 'volume metadata'):
+        with patch.object(upgrade, 'request', side_effect=[[{'name': 'password'}], [{'name': 'data', 'target': '/wrong', 'uid': 0, 'gid': 0}]]), self.assertRaisesRegex(ValueError, 'volume metadata'):
             upgrade.validate_resource_refs([spec])
 
     def test_profile_requires_project_and_https_domain_coverage(self):
@@ -245,11 +247,11 @@ class ProbeTests(unittest.TestCase):
         app = {'app': SPEC['app'], 'desired': 'stopped', 'fingerprint': 'fixed', 'instance_id': None}
         value = {'logical': {}, 'resources': {}, 'apps': [app], 'instances': {}, 'routes': [], 'probes': []}
         with patch.object(state, 'logical_state', return_value={}), patch.object(state, 'resource_identity', return_value={}), \
-             patch.object(upgrade, 'agent', side_effect=[{'draining': True, 'quiescent': True}, []]):
+             patch.object(upgrade, 'request', side_effect=[{'draining': True, 'quiescent': True}, []]):
             with self.assertRaisesRegex(ValueError, 'inventory'): upgrade.verify_once(value)
         value.update(apps=[], probes=[{'check': PROBE, 'before': {'postgres': 42, 'redis': '42'}}])
         with patch.object(state, 'logical_state', return_value={}), patch.object(state, 'resource_identity', return_value={}), \
-             patch.object(upgrade, 'agent', side_effect=[{'draining': True, 'quiescent': True}, [], {'routes': []}]), patch.object(upgrade, 'inspect_apps', return_value={}), patch.object(probes, 'run', return_value={'postgres': 0, 'redis': '0'}):
+             patch.object(upgrade, 'request', side_effect=[{'draining': True, 'quiescent': True}, [], {'routes': []}]), patch.object(upgrade, 'inspect_apps', return_value={}), patch.object(probes, 'run', return_value={'postgres': 0, 'redis': '0'}):
             with self.assertRaisesRegex(ValueError, 'persisted-data'): upgrade.verify_once(value)
 
     def test_verification_failure_keeps_private_diagnostics_and_never_reports_success(self):

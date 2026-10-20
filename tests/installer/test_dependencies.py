@@ -198,12 +198,13 @@ class DependencyTests(unittest.TestCase):
         self.assertEqual(client.open.call_count, 3)
         self.assertFalse(destination.exists()); self.assertFalse(destination.with_suffix('.part').exists())
 
-    def test_legacy_release_without_proxy_manifest_field_reuses_verified_lock_file(self):
-        self.materialize(); shutil.copytree(self.source, self.current)
-        value = json.loads((self.current/'manifest.json').read_text())
-        value.pop('proxy'); value.pop('package_kind')
-        (self.current/'manifest.json').write_text(json.dumps(value))
-        archive.verify(self.current)
-        shutil.rmtree(self.cache); self.reset()
-        self.materialize(lambda *a: self.fail('legacy dependency downloaded again'))
-        self.assertEqual(archive.verify(self.source)['package_kind'], 'offline')
+    def test_current_release_requires_explicit_package_kind_and_dependency_locks(self):
+        self.materialize()
+        manifest = json.loads((self.source/'manifest.json').read_text())
+        for key in ('package_kind', 'runtime', 'proxy', 'compatibility'):
+            value = dict(manifest); value.pop(key)
+            (self.source/'manifest.json').write_text(json.dumps(value))
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                archive.verify(self.source)
+        (self.source/'manifest.json').write_text(json.dumps(manifest))
+        archive.verify(self.source)

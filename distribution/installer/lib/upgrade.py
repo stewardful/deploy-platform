@@ -3,13 +3,12 @@
 import argparse
 import json
 from pathlib import Path
-import stat
 import subprocess
 import sys
 import time
 
 sys.dont_write_bytecode = True
-from agent_http import request, AgentError, SOCKET
+from agent_http import request
 from archive import verify as verify_release
 import upgrade_state as state
 from upgrade_state import UpgradeError
@@ -17,7 +16,6 @@ import upgrade_probes as probes
 from state import write_record
 
 MARKER = state.STATE / 'upgrade-maintenance'
-GATED_SOCKET = SOCKET + '.upgrade'
 BASELINE = 'upgrade-baseline.json'
 
 
@@ -30,8 +28,6 @@ def write_private(path, value):
 
 def preflight(source, checks='/etc/deploy-platform/upgrade-checks.json'):
     new = json.loads((Path(source) / 'manifest.json').read_text())
-    if 'compatibility' not in new:
-        raise UpgradeError('candidate is missing an upgrade compatibility contract')
     state.contract(new)
     for binary in ('agentd', 'agentctl'):
         version = subprocess.check_output([str(Path(source) / 'bin' / binary), '--version'], timeout=5).decode().strip().split()
@@ -42,8 +38,6 @@ def preflight(source, checks='/etc/deploy-platform/upgrade-checks.json'):
         return
     state.check_token('/etc/deploy-platform/control.token')
     old = verify_release(Path('/opt/deploy-platform/current'))
-    if 'proxy' not in old:
-        old['proxy'] = json.loads(Path('/opt/deploy-platform/current/proxy/proxy.lock.json').read_text())
     state.check(old, new)
     logical = state.logical_state()
     specs = [json.loads(row[1]) for row in logical['apps'] if row[3] == 'running']
@@ -55,39 +49,15 @@ def preflight(source, checks='/etc/deploy-platform/upgrade-checks.json'):
 def drain(seconds):
     # Durable marker makes candidate Agent start read-only before its worker starts.
     write_private(MARKER, {'schema_version': 1})
-    try:
-        request('/v1/maintenance/enter', 'POST')
-        native = True
-    except AgentError as error:
-        if error.status != 404:
-            raise
-        # Legacy 0.4.1/0.5.0: remove the public connection entry, not its containers.
-        # Established requests finish; all new CLI/Go connections fail closed.
-        if Path(GATED_SOCKET).exists():
-            raise UpgradeError('stale upgrade socket requires transaction recovery')
-        if not stat.S_ISSOCK(Path(SOCKET).lstat().st_mode):
-            raise UpgradeError('expected Agent Unix Socket')
-        Path(SOCKET).rename(GATED_SOCKET)
-        native = False
-    deadline, idle_since = time.monotonic() + seconds, None
+    request('/v1/maintenance/enter', 'POST')
+    deadline = time.monotonic() + seconds
     while True:
-        if native:
-            status = request('/v1/maintenance')
-            ready = status['draining'] and status['quiescent'] and status['pending_jobs'] == 0 and status['active_writers'] == 0
-        else:
-            ready = state.pending() == 0
-        now = time.monotonic()
-        idle_since = (idle_since if idle_since is not None else now) if ready else None
-        # Legacy server has a five-second request deadline; include a safety interval.
-        if ready and (native or now - idle_since >= 6):
+        status = request('/v1/maintenance')
+        if status['draining'] and status['quiescent'] and status['pending_jobs'] == 0 and status['active_writers'] == 0:
             return
-        if now >= deadline:
+        if time.monotonic() >= deadline:
             raise TimeoutError('deployment drain timed out; upgrade aborted without cancelling jobs')
         time.sleep(0.25)
-
-
-def agent(path):
-    return request(path, socket_path=GATED_SOCKET if Path(GATED_SOCKET).exists() else SOCKET)
 
 
 def inspect_apps(apps):
@@ -109,7 +79,7 @@ def inspect_apps(apps):
             raise UpgradeError('application running/stopped intent mismatch: ' + name)
         identities[name] = data['Id']
         if app['desired'] == 'running':
-            diagnostic = agent('/v1/diagnostics/' + name)
+            diagnostic = request('/v1/diagnostics/' + name)
             if diagnostic['state'] != 'running' or diagnostic['health'] == 'unhealthy':
                 raise UpgradeError('application diagnostic failed: ' + name)
     return identities
@@ -122,11 +92,11 @@ def validate_resource_refs(specs):
         key = spec['app']; project = key['project']
         if spec.get('secrets'):
             if project not in secrets:
-                secrets[project] = {s['name'] for s in agent('/v1/secrets/' + project)}
+                secrets[project] = {s['name'] for s in request('/v1/secrets/' + project)}
             if any(s['name'] not in secrets[project] for s in spec['secrets']):
                 raise UpgradeError('application secret reference is missing')
         if spec.get('volumes'):
-            volumes = {v['name']: v for v in agent('/v1/volumes/' + project + '/' + key['name'])}
+            volumes = {v['name']: v for v in request('/v1/volumes/' + project + '/' + key['name'])}
             user = spec.get('user') or {'uid': 0, 'gid': 0}
             for expected in spec['volumes']:
                 actual = volumes.get(expected['name'])
@@ -137,8 +107,8 @@ def validate_resource_refs(specs):
 def capture(backup, checks):
     logical = state.logical_state()
     resources = state.resource_identity()
-    apps = agent('/v1/apps')
-    routes = agent('/v1/ingress')['routes']
+    apps = request('/v1/apps')
+    routes = request('/v1/ingress')['routes']
     validate_resource_refs([json.loads(row[1]) for row in logical['apps']])
     specs = [json.loads(row[1]) for row in logical['apps'] if row[3] == 'running']
     profile = state.private_json(checks) if Path(checks).exists() else {'schema_version': 1, 'probes': []}
@@ -167,21 +137,21 @@ def stopped(source, backup):
 
 
 def verify_once(value):
-    maintenance = agent('/v1/maintenance')
+    maintenance = request('/v1/maintenance')
     if not maintenance.get('draining') or not maintenance.get('quiescent'):
         raise UpgradeError('candidate Agent is not quiescent behind its upgrade gate')
     if 'target_schemas' in value and state.schema_versions() != value['target_schemas']:
         raise UpgradeError('live schema differs from the rehearsed candidate schema')
     if json.loads(json.dumps(state.logical_state())) != value['logical'] or state.resource_identity() != value['resources']:
         raise UpgradeError('persisted applications/routes/resources changed')
-    apps = agent('/v1/apps')
+    apps = request('/v1/apps')
     def identities(values):
         return sorted((a['app']['project'], a['app']['name'], a['fingerprint'], a['desired']) for a in values)
     if identities(apps) != identities(value['apps']):
         raise UpgradeError('API application inventory or desired state changed')
     if inspect_apps(apps) != value['instances']:
         raise UpgradeError('application containers were replaced or lost')
-    current = agent('/v1/ingress')
+    current = request('/v1/ingress')
     expected = {r['route']['domain']: r['upstream_ready'] for r in value['routes']}
     if {r['route']['domain'] for r in current['routes']} != set(expected):
         raise UpgradeError('API domain inventory changed')

@@ -11,7 +11,7 @@
 | Go 控制端 | 单节点 HTTP API + 独立 Unix SDK，标准库；最低 Go 1.23 已检查，隔离 Linux 链路已验证 |
 | Web | React 18 / TypeScript / TDesign，Vite 静态构建，需现代浏览器；构建需 Node >=22.12，生产无需 Node |
 | API | HTTP/1.1 + JSON Unix Socket v1；真实 Socket、替身与实际 Linux 运行时均有验收 |
-| 状态 schema | v3，自动迁移 v1/v2；升级前备份，旧程序不支持 v3 |
+| 状态 schema | v3，直接初始化；拒绝 v1/v2 与未知结构，升级前备份 |
 | 网络 | 默认 none；bridge 共享，project 提供项目网络/服务名/防火墙隔离；发布端口固定回环 |
 | 域名/HTTPS | 受限 Caddy 代理、显式域名、自动证书；本地隔离 CA 已验收，用户公网需另验 |
 | 密钥/数据卷 | 0.2.0 支持项目密钥只读文件、应用专属目录卷；无自动删除/轮换/业务备份 |

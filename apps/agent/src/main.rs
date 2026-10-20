@@ -12,7 +12,7 @@ use std::{
 #[command(
     version,
     about = "Manage applications through an independent agentd",
-    after_help = "Common usage:\n  agentctl apply -f app.toml     Deploy TOML or JSON (alias: deploy)\n  agentctl apps                 List saved applications (alias: list)\n  agentctl logs --project demo --name web\n  agentctl diagnostics --project demo --name web\n  agentctl routes               Inspect domain synchronization\n\nRun agentctl help COMMAND for details. validate/plan work offline; all other commands use the private Agent API."
+    after_help = "Common usage:\n  agentctl apply -f app.toml     Deploy TOML or JSON\n  agentctl apps                 List saved applications\n  agentctl logs --project demo --name web\n  agentctl diagnostics --project demo --name web\n  agentctl routes               Inspect domain synchronization\n\nRun agentctl help COMMAND for details. validate/plan work offline; all other commands use the private Agent API."
 )]
 struct Cli {
     #[arg(long, global = true, default_value = "/run/deploy-platform/agent.sock")]
@@ -49,7 +49,6 @@ enum Commands {
         file: PathBuf,
     },
     /// Check API/worker availability, not application or containerd health.
-    #[command(visible_alias = "status")]
     Doctor,
     /// Node-local upgrade gate. Enter rejects writes and drains accepted jobs.
     Maintenance {
@@ -57,7 +56,6 @@ enum Commands {
         action: MaintenanceAction,
     },
     /// Deploy a TOML/JSON application; default waits for the durable job result.
-    #[command(visible_alias = "deploy")]
     Apply {
         #[arg(short, long)]
         file: PathBuf,
@@ -67,7 +65,6 @@ enum Commands {
         submit: SubmitOptions,
     },
     /// List applications and persisted running/stopped intent.
-    #[command(visible_alias = "list")]
     Apps,
     /// List domains, saved revisions and proxy synchronization state.
     Routes,
@@ -470,12 +467,12 @@ mod tests {
     }
 
     #[test]
-    fn friendly_aliases_use_the_existing_command_paths_and_defaults() {
+    fn canonical_commands_keep_defaults_and_reject_removed_aliases() {
         assert!(matches!(
-            Cli::try_parse_from(["agentctl", "list"]).unwrap().command,
+            Cli::try_parse_from(["agentctl", "apps"]).unwrap().command,
             Commands::Apps
         ));
-        match Cli::try_parse_from(["agentctl", "deploy", "-f", "app.json"])
+        match Cli::try_parse_from(["agentctl", "apply", "-f", "app.json"])
             .unwrap()
             .command
         {
@@ -483,11 +480,14 @@ mod tests {
                 assert!(!submit.no_wait);
                 assert_eq!(submit.wait_seconds, 300);
             }
-            _ => panic!("deploy must use the existing apply command"),
+            _ => panic!("expected apply command"),
         }
         assert!(matches!(
-            Cli::try_parse_from(["agentctl", "status"]).unwrap().command,
+            Cli::try_parse_from(["agentctl", "doctor"]).unwrap().command,
             Commands::Doctor
         ));
+        for alias in ["list", "deploy", "status"] {
+            assert!(Cli::try_parse_from(["agentctl", alias]).is_err());
+        }
     }
 }

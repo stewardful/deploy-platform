@@ -228,7 +228,7 @@ export default function DeployDialog({
           options={[
             { label: '无网络', value: 'none' },
             { label: '项目网络（推荐，应用名互通）', value: 'project' },
-            { label: '共享 Bridge（兼容旧应用）', value: 'bridge' },
+            { label: '共享 Bridge（跨项目共享）', value: 'bridge' },
           ]}
           onChange={(v) =>
             setSpec((s) => ({
