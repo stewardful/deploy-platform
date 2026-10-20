@@ -71,10 +71,10 @@ PostgreSQL 使用官方入口的 `POSTGRES_PASSWORD_FILE`；初始化完成后�
 
 ```bash
 # 内容从管理员私有文件读取，不要把密码放进命令行参数
-sudo cloudctl secret-create --project demo --name db-password --file /安全目录/password.txt
-sudo cloudctl secrets --project demo
-sudo cloudctl volumes --project demo --name db
-sudo cloudctl apply -f /opt/deploy-platform/current/examples/postgres.toml
+sudo cloudctl secret create --project demo --name db-password --file /安全目录/password.txt
+sudo cloudctl secret list --project demo
+sudo cloudctl volume list --project demo --name db
+sudo cloudctl deploy -f /opt/deploy-platform/current/examples/postgres.toml
 ```
 
 独立 Agent 使用 `agentctl --socket /run/deploy-platform/agent.sock ...`，不需要 Go 控制端。密钥输入文件要主动清理或安全保存；不要将它提交进仓库。
@@ -105,7 +105,7 @@ Go HTTP 入口继续要求 Bearer token，默认回环地址 + SSH 隧道；Unix
 可在空闲测试节点执行：
 
 ```bash
-sudo cloudctl stateful-smoke
+sudo cloudctl test stateful
 ```
 
 该自检串行部署真实 PostgreSQL、Redis，认证后写入数据，停止 Agent 并删除各自测试容器，再启动 Agent 自动重建并读回原数据，检查普通 API/inspect 没有上传的密钥值。最后保存停止意图并移除自己的测试容器；**测试数据目录、密钥和镜像保留**，不自动删除任何卷。它会短暂中断 Agent 管理操作，不应在繁忙业务期间执行。

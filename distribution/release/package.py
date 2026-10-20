@@ -7,6 +7,7 @@ on the deployment node or modifies host services.
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -57,6 +58,8 @@ def package(args):
             runtime_subset(Path(args.runtime_archive), stage / "runtime", args.arch, lock)
             proxy_subset(Path(args.proxy_archive or ROOT / ('target/release-cache/caddy_2.11.7_linux_'+args.arch+'.tar.gz')),stage/'proxy',args.arch, json.loads((ROOT/'distribution/release/proxy.lock.json').read_text()))
         shutil.copytree(ROOT / "distribution/installer/lib", stage / "lib", ignore=shutil.ignore_patterns("__pycache__"))
+        # Reuse the pinned artifact ZIP/URL component, not the standalone delivery daemon/CLI.
+        shutil.copyfile(ROOT / "distribution/vendor/deploy-delivery/scripts/delivery.py", stage / "lib/delivery.py")
         shutil.copyfile(ROOT / "crates/ingress/bootstrap.json", stage / "lib/proxy-bootstrap.json")
         for name in ("install.sh", "cloudctl", "smoke.py", "stateful_smoke.py", "fullstack_smoke.py"):
             shutil.copyfile(ROOT / "distribution/installer" / name, stage / name)
@@ -71,6 +74,9 @@ def package(args):
         shutil.copyfile(ROOT / "docs/upgrade.md", stage / "UPGRADE.md")
         files = {p.relative_to(stage).as_posix(): archive.digest(p) for p in sorted(stage.rglob("*")) if p.is_file()}
         manifest = {"schema_version": 1, "package_kind": kind, "version": args.version, "arch": args.arch, "runtime": lock, "proxy": json.loads((ROOT / "distribution/release/proxy.lock.json").read_text()), "compatibility": json.loads((ROOT / "distribution/release/compatibility.json").read_text()), "files": files}
+        commit = os.environ.get('GITHUB_SHA', '')
+        if re.fullmatch(r'[a-f0-9]{40}', commit):
+            manifest['build'] = {'commit': commit, 'channel': 'dev' if os.environ.get('GITHUB_REF') == 'refs/heads/dev' else 'stable' if os.environ.get('GITHUB_REF') == 'refs/heads/main' else 'test'}
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         archive.verify(stage, args.arch)
         stem = "deploy-platform-" + args.version + "-linux-" + args.arch

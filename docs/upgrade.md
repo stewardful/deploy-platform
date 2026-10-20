@@ -54,7 +54,7 @@ bash deploy-platform-0.5.1-linux-amd64.run --check
 sudo bash deploy-platform-0.5.1-linux-amd64.run --upgrade \
   --drain-seconds 300 --verify-seconds 120
 sudo cloudctl maintenance status
-sudo cloudctl verify
+sudo cloudctl status
 ```
 
 ARM64 使用 arm64 包。可通过 `--checks-file /绝对路径/配置.json` 指定私有配置，没有跳过业务验证的升级参数。

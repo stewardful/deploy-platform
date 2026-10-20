@@ -34,6 +34,8 @@ docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2
     --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=1g "$IMAGE" >/dev/null
 docker cp "$INSTALLER" "$NAME:/var/tmp/install.run"
 node_exec "$NAME" bash /var/tmp/install.run --skip-apt
+docker cp "$ROOT/distribution/tests/cli-contract.py" "$NAME:/var/tmp/cli-contract.py"
+node_exec "$NAME" python3 -I -B /var/tmp/cli-contract.py
 # Reinstallation must work with external HTTPS blocked: dependencies are reused
 # from the verified installed release/cache, or already bundled offline.
 node_exec "$NAME" iptables -I OUTPUT -p tcp --dport 443 -j REJECT
@@ -44,12 +46,12 @@ AFTER=$(node_exec "$NAME" sha256sum /etc/deploy-platform/control.token)
 node_exec "$NAME" iptables -D OUTPUT -p tcp --dport 443 -j REJECT
 echo 'PASS: reinstall with external HTTPS blocked (no dependency download)'
 if [[ $STATEFUL == 1 ]]; then
-    node_exec "$NAME" cloudctl stateful-smoke
+    node_exec "$NAME" cloudctl test stateful
 else
-    node_exec "$NAME" cloudctl smoke
+    node_exec "$NAME" cloudctl test smoke
 fi
 # Self-tests must not add bytecode files to an immutable, verified release.
-node_exec "$NAME" cloudctl fullstack-smoke --help >/dev/null
+node_exec "$NAME" cloudctl test fullstack --help >/dev/null
 node_exec "$NAME" python3 -B /opt/deploy-platform/current/lib/archive.py verify /opt/deploy-platform/current >/dev/null
 node_exec "$NAME" bash /var/tmp/install.run --skip-apt
 AFTER=$(node_exec "$NAME" sha256sum /etc/deploy-platform/control.token)

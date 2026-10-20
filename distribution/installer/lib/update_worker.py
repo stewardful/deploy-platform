@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""On-demand trusted-release downloader. No HTTP listener; no project mutation logic.
+"""On-demand stable/dev platform update worker. No HTTP listener; no project mutation logic.
 
 Runs outside deploy-control's cgroup. The existing installer owns compatibility,
 maintenance, backups, validation and rollback. Never retries an interrupted upgrade.
@@ -18,6 +18,8 @@ import time
 import urllib.request
 from urllib.parse import urlsplit
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from state import write_record
 
 SPOOL = Path('/var/lib/deploy-platform/updates')
@@ -27,6 +29,7 @@ CURRENT = Path('/opt/deploy-platform/current/manifest.json')
 TRANSACTION = Path('/var/lib/deploy-platform/install-transaction.json')
 VERSION = r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
 MAX_INSTALLER = 512 * 1024**2
+ACTIVE_DETAILS = {}
 
 
 def private_read(path, limit):
@@ -111,11 +114,12 @@ def discover(repo, token, request, arch):
     return asset
 
 
-def download(repo, token, asset, target):
+def download(repo, token, asset, target, *, open_asset=None):
     if shutil.disk_usage(target.parent).free < asset['size'] + 2 * 1024**3:
         raise ValueError('insufficient free space')
     start, size, digest = time.monotonic(), 0, hashlib.sha256()
-    with open_github('repos/' + repo + '/releases/assets/' + str(asset['id']), token, True) as response, target.open('xb') as output:
+    open_asset = open_asset or (lambda: open_github('repos/' + repo + '/releases/assets/' + str(asset['id']), token, True))
+    with open_asset() as response, target.open('xb') as output:
         while True:
             if time.monotonic() - start > 900:
                 raise ValueError('download deadline exceeded')
@@ -138,8 +142,9 @@ def execute(request):
     if not re.fullmatch(VERSION, version):
         raise ValueError('invalid version')
     current = json.loads(CURRENT.read_text())
-    if tuple(map(int, version.split('.'))) <= tuple(map(int, current['version'].split('.'))):
-        raise ValueError('only newer releases allowed')
+    if (tuple(map(int, version.split('.'))) < tuple(map(int, current['version'].split('.'))) or
+            (version == current['version'] and current.get('build', {}).get('channel') != 'dev')):
+        raise ValueError('only newer releases or same-version dev-to-stable promotion allowed')
     arch = {'aarch64': 'arm64', 'x86_64': 'amd64'}.get(platform.machine())
     if arch is None or current['arch'] != arch:
         raise ValueError('unsupported node architecture')
@@ -159,16 +164,17 @@ def execute(request):
         # Installer's own bounded drain/verify and ERR trap own failure recovery.
         subprocess.run(['/usr/bin/bash', str(installer), '--upgrade', '--skip-apt'], check=True)
     installed = json.loads(CURRENT.read_text())
-    if installed['version'] != version or TRANSACTION.exists():
+    if installed['version'] != version or installed.get('build', {}).get('channel') == 'dev' or TRANSACTION.exists():
         raise ValueError('installation has not committed')
     report(version, 'succeeded', '升级完成，已有项目验证通过')
 
 
 def report(version, phase, message):
-    write_record(SPOOL / 'result.json', {'version': version, 'phase': phase, 'message': message})
+    write_record(SPOOL / 'result.json', {**ACTIVE_DETAILS, 'version': version, 'phase': phase, 'message': message})
 
 
 def main():
+    global ACTIVE_DETAILS
     os.umask(0o077)
     with (SPOOL / 'worker.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -182,8 +188,15 @@ def main():
         try:
             request = json.loads(private_read(active, 4096))
             version = request.get('version', '')
+            ACTIVE_DETAILS = {k: request[k] for k in ('channel', 'run_id', 'commit') if k in request}
             report(version, 'checking', '正在确认已批准的版本')
-            execute(request)
+            if request.get('channel') == 'dev':
+                from dev_update import execute as execute_dev
+                execute_dev(request)
+            elif request.get('channel', 'stable') == 'stable':
+                execute(request)
+            else:
+                raise ValueError('unsupported update channel')
         except Exception:
             # Neither HTTP signed URLs, token values, nor private installer output
             # are returned through the public API. Detailed installer logs: journal.

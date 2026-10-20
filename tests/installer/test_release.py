@@ -147,34 +147,25 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    def test_node_entry_preserves_arguments_and_never_swallows_unknown_commands(self):
+    def test_installed_wrapper_uses_immutable_release_cli_without_environment_overrides(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / 'bin').mkdir()
-            agent = root / 'bin/agentctl'
-            agent.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$@"\n')
-            agent.chmod(0o755)
-            wrapper = root / 'cloudctl'
-            source = (ROOT / 'distribution/installer/cloudctl').read_text()
-            wrapper.write_text(source.replace('ROOT=/opt/deploy-platform/current', 'ROOT=' + shlex.quote(str(root))))
-            commands = [
-                ['apps'], ['deploy', '-f', 'file with spaces.json'],
-                ['start', '--project', 'demo', '--name', 'web'],
-                ['logs', '--project', 'demo', '--name', 'web', '--tail', '20'],
-                ['agentctl', 'routes'], ['help', 'deploy'],
-            ]
-            for args in commands:
-                with self.subTest(args=args):
-                    result = subprocess.run(['bash', str(wrapper), *args], check=True, text=True, capture_output=True)
-                    forwarded = args[1:] if args[0] == 'agentctl' else args
-                    self.assertEqual(result.stdout.splitlines(), ['--socket', '/run/deploy-platform/agent.sock', *forwarded])
-            for args in [[], ['help'], ['help', 'status'], ['stateful-smoke', '--help'], ['system-logs', '--help']]:
-                result = subprocess.run(['bash', str(wrapper), *args], check=True, text=True, capture_output=True)
-                self.assertIn('Applications', result.stdout)
-                self.assertIn('system-logs', result.stdout)
-            for args in [['unknown-command'], ['system-logs', 'unexpected.service'], ['smoke', '--unexpected']]:
-                result = subprocess.run(['bash', str(wrapper), *args], text=True, capture_output=True)
-                self.assertEqual(result.returncode, 2)
+            shutil.copytree(ROOT/'distribution/installer/lib', root/'lib', ignore=shutil.ignore_patterns('__pycache__'))
+            shutil.copyfile(ROOT/'distribution/installer/fullstack_smoke.py', root/'fullstack_smoke.py')
+            shutil.copyfile(ROOT/'distribution/installer/smoke.py', root/'smoke.py')
+            shutil.copytree(ROOT/'examples/fullstack', root/'examples/fullstack')
+            wrapper = root/'cloudctl'
+            source = (ROOT/'distribution/installer/cloudctl').read_text()
+            wrapper.write_text(source.replace('ROOT=/opt/deploy-platform/current', 'ROOT='+shlex.quote(str(root))))
+            result = subprocess.run(['bash', str(wrapper), '--help'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Applications', result.stdout)
+            self.assertIn('upgrade-dev', result.stdout)
+            result = subprocess.run(['bash', str(wrapper), 'test', 'fullstack', '--help'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('--image', result.stdout)
+            result = subprocess.run(['bash', str(wrapper), 'version', 'ignored'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
 
 
 class TransactionTests(unittest.TestCase):

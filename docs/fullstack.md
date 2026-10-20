@@ -109,9 +109,9 @@ sudo cloudctl runtime load -i fullstack-demo.tar
 安装当前版本后，在专门测试节点运行：
 
 ```sh
-sudo cloudctl fullstack-smoke --image REGISTRY/PROJECT/fullstack:v1
+sudo cloudctl test fullstack --image REGISTRY/PROJECT/fullstack:v1
 # 已导入自建镜像时：
-sudo cloudctl fullstack-smoke --image docker.io/library/cloud-fullstack-demo:v1 --pull-policy never
+sudo cloudctl test fullstack --image docker.io/library/cloud-fullstack-demo:v1 --pull-policy never
 # 需要留下网页演示：追加 --keep-running
 ```
 

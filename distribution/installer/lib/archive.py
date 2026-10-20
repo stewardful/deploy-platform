@@ -57,6 +57,31 @@ def extract(archive, destination):
             path.chmod(0o755 if member.mode & 0o111 else 0o644)
 
 
+def installer_manifest(path):
+    """Inspect a checksum-verified .run without executing it or extracting files."""
+    with Path(path).open('rb') as source:
+        consumed = 0
+        while True:
+            line = source.readline(1024 * 1024 + 1)
+            consumed += len(line)
+            if not line or consumed > 1024 * 1024:
+                raise ValueError('installer header missing or oversized')
+            if line == b'__CLOUD_ARCHIVE__\n': break
+        result, count, size = None, 0, 0
+        with tarfile.open(fileobj=source, mode='r|gz') as payload:
+            for member in payload:
+                count += 1
+                size += member.size
+                if count > MAX_FILES or size > MAX_BYTES:
+                    raise ValueError('installer archive exceeds limits')
+                if member.name == 'manifest.json':
+                    if result is not None or not member.isfile() or member.size > 2 * 1024**2:
+                        raise ValueError('invalid installer manifest')
+                    result = json.loads(payload.extractfile(member).read())
+        if result is None: raise ValueError('installer manifest missing')
+        return result
+
+
 def verify(directory, expected_arch=None):
     root = Path(directory)
     manifest = json.loads((root / "manifest.json").read_text())

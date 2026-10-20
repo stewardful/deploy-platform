@@ -41,7 +41,7 @@ docs/            设计、使用、验收和维护说明
 ```bash
 bash deploy-platform-0.5.3-linux-amd64.run --check
 sudo bash deploy-platform-0.5.3-linux-amd64.run
-sudo cloudctl verify
+sudo cloudctl status
 sudo cloudctl token
 ```
 

@@ -65,3 +65,17 @@ sudo cat /var/lib/deploy-platform/updates/result.json
 - `POST /api/v1/updates/upgrade`，JSON `{"version":"0.5.3"}`：只能提交最近一小时内检查过的更新版本；202 表示已排队，不代表成功；版本变化或已有任务返回 409。
 
 配置不启用更新目录的开发控制端返回 `enabled:false`，网页隐藏更新区。测试覆盖可信元数据、私有凭据、重复点击、陈旧候选、重定向脱敏、下载大小/摘要/磁盘限制、执行中断和独立安装入口。Web 浏览器测试使用隔离 API 响应验证提示、确认与刷新不重复提交；这不替代真实 GitHub Release 和腾讯云验收。
+
+## 命令行更新与 dev 构建
+
+命令行正式升级复用上述 API 和 worker：`cloudctl update check` 后显式运行 `cloudctl upgrade --version X.Y.Z --yes`。查询执行结果用 `cloudctl update status`，该查询不依赖正在重启的控制端。应用操作、平台升级和业务应用发布的边界见 [命令指南](commands.md)。
+
+`cloudctl upgrade-dev --run-id RUN_ID` 只展示该构建的固定元数据；加 `--yes` 才排队。私有仓库需要服务器配置的 token 对该仓库有 **Actions: read** 权限；正式版 Contents 只读权限不足以下载 Actions 产物。凭据仍从现有私有文件读取，不能传在命令行、日志或网页参数中。
+
+dev 来源固定为配置仓库的 `.github/workflows/dev-deploy.yml`、`dev` 分支、push/workflow_dispatch，拒绝 PR、fork 和其他工作流。运行必须结束，且 `build / test` 与对应架构的 package 任务成功；若只是最后 SSH 部署失败，仍可手动拉取已验证的构建。必须存在唯一、未过期、架构匹配的 `deploy-platform-linux-ARCH` 产物，包含 `.run` 与 `.sha256`。GitHub 产物保留期目前三天，过期后需重新构建，不能靠运行编号恢复过期文件。初版按一次至多 100 条任务/产物检查，超出造成目标缺失时拒绝安装。
+
+worker 在下载前再次核对运行编号、提交、产物 ID、大小和 GitHub SHA256，使用已有流式下载器和固定版本 ZIP 提取组件。下载后核对包 manifest 的 dev 来源与提交 SHA；旧包缺少来源记录时拒绝安装，需要由新打包流程重新构建 dev。没有 alpha/beta Release 自动选择，也不支持任意下载 URL。
+
+dev 不增加 API、常驻服务或版本轮询；CLI 原子提交同一个更新队列，执行器继续调用原安装器 `--check`、`--upgrade --skip-apt`。Web 和 CLI 的提交由跨进程锁串行化，安装器节点锁同时覆盖离线包和独立 CI 工具。更新结果包含 channel/run_id/commit，失败不会自动重试。
+
+手动 CLI 不需要安装独立 deploy-delivery。它只是复用仓库固定版本的无状态 ZIP/URL 组件，该组件随平台包一起安装；现有 CI 的 SSH 交付工具仍按 [CI/CD](ci-cd.md) 独立使用，本次不改变它的部署约定。首次使用新命令仍需先安装包含这些命令的版本。

@@ -81,6 +81,19 @@ class DependencyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.cache.exists())
 
+    def test_dev_package_carries_cli_components_and_matching_build_provenance(self):
+        version = json.loads((self.source/'manifest.json').read_text())['version']
+        args = SimpleNamespace(kind='platform-update', version=version, arch='amd64', output=self.output, bin_dir=self.root/'bin', web_dir=self.root/'web', runtime_archive=None, proxy_archive=None)
+        with patch.dict(__import__('os').environ, {'GITHUB_SHA': 'a'*40, 'GITHUB_REF': 'refs/heads/dev'}):
+            package.package(args)
+        runner = next(self.output.glob('*.run'))
+        manifest = archive.installer_manifest(runner)
+        self.assertEqual(manifest['build'], {'channel': 'dev', 'commit': 'a'*40})
+        for name in ('node_cli.py', 'platform_updates.py', 'dev_update.py', 'delivery.py'):
+            self.assertIn('lib/'+name, manifest['files'])
+        invalid = self.root/'invalid.run'; invalid.write_bytes(b'not a payload')
+        with self.assertRaises(ValueError): archive.installer_manifest(invalid)
+
     def test_first_use_downloads_and_second_use_offline_reuses_cache(self):
         value = self.materialize(); self.assertEqual(value['package_kind'], 'offline')
         self.assertEqual(self.calls, ['runtime','proxy'])

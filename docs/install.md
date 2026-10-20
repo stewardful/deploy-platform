@@ -51,7 +51,7 @@ ssh -N -L 18080:127.0.0.1:18080 ubuntu@服务器公网IP
 也可执行完整的真实部署自检：
 
 ```bash
-sudo cloudctl smoke
+sudo cloudctl test smoke
 # 或首次安装时添加 --smoke-test
 ```
 
@@ -108,10 +108,10 @@ sudo bash deploy-platform-新版本-linux-amd64.run --upgrade
 ## 运维命令
 
 ```bash
-sudo cloudctl verify
-sudo cloudctl logs agent
-sudo cloudctl logs control
-sudo cloudctl logs runtime
+sudo cloudctl status
+sudo cloudctl system-logs agent
+sudo cloudctl system-logs control
+sudo cloudctl system-logs runtime
 sudo cloudctl apps
 sudo cloudctl runtime ps -a
 sudo systemctl restart deploy-agent
