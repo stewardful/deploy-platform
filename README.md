@@ -36,16 +36,19 @@ docs/            设计、使用、验收和维护说明
 
 ## 安装到 Ubuntu
 
-在服务器上传目录执行对应架构的安装包；x86_64 使用 amd64，aarch64 使用 arm64：
+从本仓库成功 CI 的 `cloudctl` 产物或正式 Release 获取 cloudctl 和校验文件，在服务器校验后使用同一命令安装与升级：
 
 ```bash
-bash deploy-platform-0.5.3-linux-amd64.run --check
-sudo bash deploy-platform-0.5.3-linux-amd64.run
+sha256sum -c cloudctl.sha256
+chmod +x cloudctl
+sudo ./cloudctl install --channel dev --token-file /绝对路径/github.token
 sudo cloudctl status
 sudo cloudctl token
 ```
 
-已有安装使用 `--upgrade`。电脑建立 SSH 隧道后，访问 `http://127.0.0.1:8088/` 登录；管理端保持回环监听。业务域名通过独立 Caddy 提供 HTTPS。准备安装包、示例镜像、密钥、DNS 和端口的完整步骤见 [腾讯云手册](docs/tencent-ubuntu-walkthrough.md)。
+私有仓库在线 dev 安装需要 Actions:read 的 token 私有文件；正式安装用 `--channel stable`，私有 Release 需要 Contents:read。已有离线包可用 `cloudctl install --file /绝对路径/平台.run`。安装后使用 `cloudctl upgrade-dev` 或 `cloudctl upgrade`；详见 [统一首次安装](docs/install.md#统一-cloudctl-首次安装)。
+
+电脑建立 SSH 隧道后，访问 `http://127.0.0.1:8088/` 登录；管理端保持回环监听。业务域名通过独立 Caddy 提供 HTTPS。准备安装包、示例镜像、密钥、DNS 和端口的完整步骤见 [腾讯云手册](docs/tencent-ubuntu-walkthrough.md)。
 
 应用常用命令已统一到 `cloudctl apps/deploy/start/stop/logs/diagnostics`，通过 `cloudctl help` 查看默认能力；无需 Go/Web 的独立 Agent 用法见 [命令指南](docs/commands.md)。
 

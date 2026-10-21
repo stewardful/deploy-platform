@@ -19,7 +19,7 @@ GROUPS = {
     'route': {'list': 'routes', 'set': 'route-set', 'delete': 'route-delete'},
 }
 SERVICES = {'agent': 'deploy-agent', 'control': 'deploy-control', 'runtime': 'deploy-containerd',
-            'proxy': 'deploy-proxy', 'update': 'deploy-update'}
+            'proxy': 'deploy-proxy', 'update': 'deploy-update', 'install': 'deploy-platform-bootstrap'}
 DESCRIPTION = '''cloudctl — applications and platform maintenance on this node
 
 Applications (Agent API; Go/Web not required):
@@ -38,6 +38,8 @@ Data and domains:
   route list | set | delete    Manage domain routes with revision checks
 
 Node and updates:
+  install --channel stable|dev [--token-file PATH]   First installation
+  install --file INSTALLER.run  First installation from a local package
   status                       Check installed services, runtime, Web and authentication
   agent-health                 Check Agent API and task acceptance only
   version                      Platform release, build and component versions
@@ -47,6 +49,7 @@ Node and updates:
   upgrade-dev [--run-id ID] [--yes] Latest successful dev build, or a specific run
 
 Advanced:
+  delivery preflight|start|refresh|status|logs    CI control through this CLI
   token                        Print private Web login token (sudo)
   maintenance status | enter | exit    Upgrade admission gate, not an upgrade
   test smoke | stateful | fullstack    Real tests; create resources and may restart Agent
@@ -75,6 +78,8 @@ def parser(name, description):
 
 
 def version():
+    if not (ROOT/'manifest.json').is_file():
+        print(json.dumps({'version': json.loads((ROOT/'cli.json').read_text())['version'], 'installed': False})); return
     manifest = json.loads((ROOT/'manifest.json').read_text())
     result = {key: manifest.get(key) for key in ('version', 'arch', 'package_kind', 'build')}
     result['components'] = {}
@@ -96,6 +101,16 @@ def main(argv=None):
         args = args[1:]+['--help']
     name, rest = args[0], args[1:]
     if name in ('--version',): name = 'version'
+    if name == 'install':
+        from first_install import main as install, InstallError
+        try: install(rest)
+        except InstallError as error:
+            print('cloudctl install: '+str(error), file=sys.stderr)
+            raise SystemExit(2) from None
+        return
+    if name == 'delivery':
+        from ci_control import main as control
+        control(rest); return
     if name in AGENT:
         if name == 'preview' and rest in (['--help'], ['-h']):
             p = parser(name, 'Validate and summarize an AppSpec offline. No live-state comparison, runtime checks or deployment dry-run. Secrets are referenced, not resolved.')

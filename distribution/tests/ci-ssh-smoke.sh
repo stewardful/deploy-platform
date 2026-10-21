@@ -28,7 +28,7 @@ trap cleanup EXIT
 docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution/tests/Dockerfile.ubuntu" -t "cloud-upgrade-test:$UBUNTU_VERSION" "$ROOT" >/dev/null
 docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution/tests/Dockerfile.ci-ssh" -t "cloud-ci-ssh-test:$UBUNTU_VERSION" "$ROOT" >/dev/null
 docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2g --pids-limit=512 \
-    -p 127.0.0.1::22 --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=2g "cloud-ci-ssh-test:$UBUNTU_VERSION" >/dev/null
+    -p 127.0.0.1::22 --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=2g,mode=0700 "cloud-ci-ssh-test:$UBUNTU_VERSION" >/dev/null
 ssh-keygen -q -t ed25519 -N '' -f "$work/key"
 node_exec "$NAME" mkdir -p -m 0700 /root/.ssh
 docker cp "$work/key.pub" "$NAME:/root/.ssh/authorized_keys" >/dev/null
@@ -102,51 +102,37 @@ PYWRAPPER
 chmod 0700 "$work/bin/python3"
 export PATH="$work/bin:$PATH" CI_FIXTURE_REQUEST_FILE="$work/request.json"
 export CI_FIXTURE_MODE=corrupt
-# Missing tool must fail before authorizing or launching a deployment; CI cannot bootstrap it.
-if bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/missing-tool.log" 2>&1; then
-    echo 'missing delivery tool was accepted' >&2; exit 1
+# The server must first be provisioned with cloudctl install; CI sends data only.
+if bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/missing-cli.log" 2>&1; then
+    echo 'uninstalled platform was accepted' >&2; exit 1
 fi
-grep -q 'Install/configure deploy-delivery' "$work/missing-tool.log"
-node_exec "$NAME" test ! -e /etc/deploy-platform/install.json
-echo 'PASS: project CI refuses a server without an independently installed delivery tool'
-python3 -B "$ROOT/distribution/vendor/deploy-delivery/scripts/package.py" --output "$work/tool"
-node_exec "$NAME" mkdir -p -m 0700 /var/tmp/delivery-tool
-# Test provisioning only: tool installation is NOT performed by deploy-test.sh.
-docker cp "$work/tool/." "$NAME:/var/tmp/delivery-tool/" >/dev/null
-node_exec "$NAME" bash -c 'cd /var/tmp/delivery-tool; sha256sum -c deploy-delivery-0.1.0.tar.gz.sha256; tar -xzf deploy-delivery-0.1.0.tar.gz'
-for ((repeat=0; repeat<2; repeat++)); do
-    node_exec "$NAME" /usr/bin/python3 -I -B /var/tmp/delivery-tool/deploy-delivery-0.1.0/scripts/install.py --repository owner/repo --arch "$TEST_SERVER_ARCH"
-done
-node_exec "$NAME" /usr/local/bin/deploy-delivery preflight "$TEST_SERVER_ARCH"
-old_tool=$(node_exec "$NAME" readlink /opt/deploy-delivery/current)
-# An internally checksummed but broken candidate must fail its probe and preserve current.
-mkdir -p "$work/broken-source"
-cp -R "$ROOT/distribution/vendor/deploy-delivery/scripts" "$work/broken-source/scripts"
-cp "$ROOT/distribution/vendor/deploy-delivery/README.md" "$work/broken-source/README.md"
-printf '\nraise RuntimeError("test candidate failure")\n' >> "$work/broken-source/scripts/service.py"
-python3 -B "$work/broken-source/scripts/package.py" --output "$work/broken-tool" >/dev/null
-node_exec "$NAME" mkdir -p -m 0700 /var/tmp/broken-tool
-docker cp "$work/broken-tool/." "$NAME:/var/tmp/broken-tool/" >/dev/null
-node_exec "$NAME" tar -xzf /var/tmp/broken-tool/deploy-delivery-0.1.0.tar.gz -C /var/tmp/broken-tool
-if node_exec "$NAME" /usr/bin/python3 -I -B /var/tmp/broken-tool/deploy-delivery-0.1.0/scripts/install.py --repository owner/repo --arch "$TEST_SERVER_ARCH"; then
-    echo 'broken delivery tool replaced current' >&2; exit 1
+grep -q 'Install the platform with cloudctl install' "$work/missing-cli.log"
+python3 -B "$ROOT/distribution/cli/package.py" --output "$work/cli"
+docker cp "$work/cli/cloudctl" "$NAME:/var/tmp/cloudctl" >/dev/null
+docker cp "$INSTALLER" "$NAME:/var/tmp/first.run" >/dev/null
+if ! node_exec "$NAME" /usr/bin/python3 -I -B /var/tmp/cloudctl install --file /var/tmp/first.run --repository owner/repo; then
+    node_exec "$NAME" journalctl -u deploy-platform-bootstrap -n 100 --no-pager
+    exit 1
 fi
-[[ $(node_exec "$NAME" readlink /opt/deploy-delivery/current) == "$old_tool" ]]
-node_exec "$NAME" /usr/local/bin/deploy-delivery version
-echo 'PASS: independent tool installation is repeatable and a failed candidate preserves the installed version'
+node_exec "$NAME" /usr/local/bin/cloudctl delivery preflight "$TEST_SERVER_ARCH"
+node_exec "$NAME" test ! -e /usr/local/bin/deploy-delivery
+old_release=$(node_exec "$NAME" readlink /opt/deploy-platform/current)
+echo 'PASS: standalone cloudctl completes first install; no independent delivery tool'
+
 wrong="[127.0.0.1]:$TEST_SERVER_PORT $(cat "$work/key.pub")"
-if TEST_SSH_KNOWN_HOSTS="$wrong" bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/wrong-host.log" 2>&1; then
+if TEST_SSH_KNOWN_HOSTS="$wrong" bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/wrong-host.log" 2>&1; then
     echo 'wrong host key was accepted' >&2; exit 1
 fi
-node_exec "$NAME" test ! -e /etc/deploy-platform/install.json
+[[ $(node_exec "$NAME" readlink /opt/deploy-platform/current) == "$old_release" ]]
 echo 'PASS: wrong SSH host key refused before download/installation'
-if bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/corrupt.log" 2>&1; then echo 'corrupt artifact was installed' >&2; exit 1; fi
-node_exec "$NAME" test ! -e /etc/deploy-platform/install.json
-node_exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="archive_digest_mismatch"' "/var/lib/deploy-delivery/jobs/$GITHUB_RUN_ID-1/result.json"
+
+if bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/corrupt.log" 2>&1; then echo 'corrupt artifact was installed' >&2; exit 1; fi
+[[ $(node_exec "$NAME" readlink /opt/deploy-platform/current) == "$old_release" ]]
+node_exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="archive_digest_mismatch"' "/var/lib/deploy-platform/delivery/jobs/$GITHUB_RUN_ID-1/result.json"
 echo 'PASS: corrupt HTTPS archive rejected before installation'
 GITHUB_RUN_ATTEMPT=2 CI_FIXTURE_MODE=resume-expired
 export GITHUB_RUN_ATTEMPT CI_FIXTURE_MODE
-if ! bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh"; then
+if ! bash "$ROOT/distribution/ci/deploy-test.sh"; then
     node_exec "$NAME" journalctl -u "deploy-platform-ci-$GITHUB_RUN_ID-2" -n 40 --no-pager
     exit 1
 fi
@@ -155,9 +141,9 @@ echo 'PASS: expired URL refreshed, interrupted HTTPS resumed, verified first ins
 # A second accepted deployment must finish even if the Actions runner disconnects.
 GITHUB_RUN_ATTEMPT=3 CI_FIXTURE_MODE=slow
 export GITHUB_RUN_ATTEMPT CI_FIXTURE_MODE
-bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/disconnected.log" 2>&1 &
+bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/disconnected.log" 2>&1 &
 runner_pid=$!
-stage=/var/lib/deploy-delivery/jobs/$GITHUB_RUN_ID-3
+stage=/var/lib/deploy-platform/delivery/jobs/$GITHUB_RUN_ID-3
 started=0
 for ((attempt=0; attempt<60; attempt++)); do
     if node_exec "$NAME" test -f /run/cloud-ci-slow-started; then started=1; break; fi
@@ -167,44 +153,13 @@ done
 kill "$runner_pid" 2>/dev/null || true
 wait "$runner_pid" 2>/dev/null || true
 runner_pid=''
-# Upgrade only the tool while an old-version worker is in flight. Its immutable code stays available.
-mkdir -p "$work/next-source"
-cp -R "$ROOT/distribution/vendor/deploy-delivery/scripts" "$work/next-source/scripts"
-cp "$ROOT/distribution/vendor/deploy-delivery/README.md" "$work/next-source/README.md"
-printf '\n# isolated tool upgrade fixture\n' >> "$work/next-source/scripts/service.py"
-python3 -B "$work/next-source/scripts/package.py" --output "$work/next-tool" >/dev/null
-node_exec "$NAME" mkdir -p -m 0700 /var/tmp/next-tool
-docker cp "$work/next-tool/." "$NAME:/var/tmp/next-tool/" >/dev/null
-node_exec "$NAME" tar -xzf /var/tmp/next-tool/deploy-delivery-0.1.0.tar.gz -C /var/tmp/next-tool
-node_exec -i "$NAME" /usr/bin/python3 -I -B - "$TEST_SERVER_ARCH" <<'TOOLROLLBACK'
-import importlib.util, pathlib, subprocess, sys
-from unittest.mock import patch
-source=pathlib.Path('/var/tmp/next-tool/deploy-delivery-0.1.0')
-spec=importlib.util.spec_from_file_location('tool_installer',source/'scripts/install.py')
-installer=importlib.util.module_from_spec(spec);spec.loader.exec_module(installer)
-current=pathlib.Path('/opt/deploy-delivery/current');previous=current.readlink()
-real_run=subprocess.run
-def fail_installed_probe(args, **kwargs):
-    if args[0]=='/usr/local/bin/deploy-delivery':raise subprocess.CalledProcessError(42,args)
-    return real_run(args, **kwargs)
-with patch.object(installer.subprocess,'run',side_effect=fail_installed_probe):
-    try:installer.install(source,'owner/repo',sys.argv[1])
-    except subprocess.CalledProcessError:pass
-    else:raise AssertionError('injected activation failure was ignored')
-assert current.readlink()==previous
-print('PASS: tool activation failure restores the previous pointer')
-TOOLROLLBACK
-node_exec "$NAME" /usr/bin/python3 -I -B /var/tmp/next-tool/deploy-delivery-0.1.0/scripts/install.py --repository owner/repo --arch "$TEST_SERVER_ARCH"
-[[ $(node_exec "$NAME" readlink /opt/deploy-delivery/current) != "$old_tool" ]]
-node_exec "$NAME" test -f "$old_tool/scripts/remote-install.py"
-node_exec "$NAME" test -f "$stage/request.json"
 # Concurrent delivery must fail without touching an already accepted installation.
 GITHUB_RUN_ATTEMPT=4
 export GITHUB_RUN_ATTEMPT
-if bash "$ROOT/distribution/vendor/deploy-delivery/scripts/deploy-test.sh" > "$work/busy.log" 2>&1; then echo 'concurrent delivery unexpectedly accepted' >&2; exit 1; fi
-node_exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="deployment_busy"' "/var/lib/deploy-delivery/jobs/$GITHUB_RUN_ID-4/result.json"
+if bash "$ROOT/distribution/ci/deploy-test.sh" > "$work/busy.log" 2>&1; then echo 'concurrent delivery unexpectedly accepted' >&2; exit 1; fi
+node_exec "$NAME" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["error_code"]=="deployment_busy"' "/var/lib/deploy-platform/delivery/jobs/$GITHUB_RUN_ID-4/result.json"
 echo 'PASS: parallel delivery rejected by independent worker lock'
-node_exec "$NAME" systemctl show "deploy-platform-ci-$GITHUB_RUN_ID-3" --property=ExecStart --value | grep -F "$old_tool/scripts/remote-install.py" >/dev/null
+node_exec "$NAME" systemctl show "deploy-platform-ci-$GITHUB_RUN_ID-3" --property=ExecStart --value | grep -F "$old_release/lib/ci_worker.py" >/dev/null
 node_exec "$NAME" touch /run/cloud-ci-release-slow
 finished=0
 for ((attempt=0; attempt<180; attempt++)); do
@@ -219,5 +174,5 @@ node_exec "$NAME" test ! -e "$stage/download.json"
 node_exec "$NAME" cloudctl maintenance status
 echo 'PASS: runner disconnect does not cancel HTTPS download or protected upgrade'
 
-node_exec "$NAME" python3 -c 'from pathlib import Path; assert not list(Path("/var/lib/deploy-delivery/jobs").rglob("*.py"))'
-echo 'PASS: tool upgrade retains in-flight jobs; requests carry no executable source'
+node_exec "$NAME" python3 -c 'from pathlib import Path; assert not list(Path("/var/lib/deploy-platform/delivery/jobs").rglob("*.py"))'
+echo 'PASS: platform CI requests carry no executable source'

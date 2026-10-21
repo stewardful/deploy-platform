@@ -14,7 +14,6 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT/'distribution/vendor/deploy-delivery/scripts'))
 sys.path.insert(0, str(ROOT/'distribution/installer/lib'))
 import dev_update as dev
 import platform_updates as cli
@@ -33,7 +32,7 @@ class PlatformUpdateTests(unittest.TestCase):
         self.stack.enter_context(patch.object(dev.platform, 'machine', return_value='x86_64'))
         self.stack.enter_context(patch.object(worker, 'ACTIVE_DETAILS', {}))
         self.run = {'id': 42, 'path': dev.WORKFLOW, 'event': 'push', 'head_branch': 'dev', 'head_sha': 'a'*40, 'status': 'completed', 'conclusion': 'failure', 'repository': {'full_name': 'owner/repo', 'id': 1}, 'head_repository': {'full_name': 'owner/repo'}}
-        self.jobs = [{'name': 'build / test', 'conclusion': 'success'}, {'name': 'build / package (ubuntu-24.04, amd64)', 'conclusion': 'success'}]
+        self.jobs = [{'name': 'build / test', 'conclusion': 'success'}, {'name': 'build / package (ubuntu-24.04, amd64)', 'conclusion': 'success'}, {'name': 'build / cli', 'conclusion': 'success'}]
         self.artifact = {'name': 'deploy-platform-linux-amd64', 'id': 12, 'size_in_bytes': 100, 'digest': 'sha256:'+'b'*64, 'expired': False,
                          'workflow_run': {'id': 42, 'head_branch': 'dev', 'head_sha': 'a'*40, 'repository_id': 1, 'head_repository_id': 1}}
         def meta(repo, token, path):
@@ -42,6 +41,11 @@ class PlatformUpdateTests(unittest.TestCase):
             if '/artifacts?' in path: return {'artifacts': [self.artifact]}
             return self.run
         self.metadata = self.stack.enter_context(patch.object(dev, 'metadata', side_effect=meta))
+
+    def test_first_install_can_select_dev_without_an_installed_manifest(self):
+        worker.CURRENT.unlink()
+        with self.assertRaises(FileNotFoundError): dev.discover('42')
+        self.assertEqual(dev.discover('42', initial=True)['commit'], 'a'*40)
 
     def test_dev_accepts_completed_build_when_only_ssh_deployment_failed(self):
         request = dev.discover('42')
@@ -141,6 +145,19 @@ class PlatformUpdateTests(unittest.TestCase):
         with patch.object(worker, 'download'), patch.object(dev, 'extract', return_value='0.5.3'), patch('archive.installer_manifest', return_value=candidate), patch.object(dev.subprocess, 'run') as run:
             with self.assertRaises(ValueError): dev.execute(request)
             run.assert_not_called()
+
+    def test_dev_first_install_downloads_before_install_and_does_not_pass_upgrade_flags(self):
+        request = dict(dev.discover('42'), operation='install')
+        worker.CURRENT.unlink()
+        candidate = {'version': '0.5.3', 'arch': 'amd64', 'build': {'channel': 'dev', 'commit': 'a'*40}}
+        def install(argv, **kwargs):
+            if '--check' not in argv: worker.CURRENT.write_text(json.dumps(candidate))
+        with patch.object(worker, 'download'), patch.object(dev, 'extract', return_value='0.5.3'), patch('archive.installer_manifest', return_value=candidate), patch.object(dev.subprocess, 'run', side_effect=install) as run:
+            dev.execute(request)
+        self.assertEqual(run.call_count, 2)
+        self.assertNotIn('--upgrade', run.call_args.args[0])
+        self.assertNotIn('--skip-apt', run.call_args.args[0])
+        self.assertEqual(json.loads((self.root/'result.json').read_text())['phase'], 'succeeded')
 
     def test_dev_failed_installer_is_not_retried_and_records_failure(self):
         request = dev.discover('42'); cli.queue(request)

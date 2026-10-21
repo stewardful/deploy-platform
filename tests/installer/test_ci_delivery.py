@@ -15,10 +15,10 @@ import urllib.error
 import urllib.request
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT/'scripts'))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT/'distribution/installer/lib'))
 import delivery
-spec = importlib.util.spec_from_file_location('artifact_request', ROOT/'scripts/artifact-request.py')
+spec = importlib.util.spec_from_file_location('artifact_request', ROOT/'distribution/ci/artifact-request.py')
 provider = importlib.util.module_from_spec(spec);spec.loader.exec_module(provider)
 SHA='a'*40
 URL='https://test.blob.core.windows.net/archive?SIGNED_SECRET'
@@ -180,7 +180,7 @@ class ProviderTests(unittest.TestCase):
 
 class WorkerBoundaryTests(unittest.TestCase):
     def test_wall_clock_timeout_only_wraps_downloader_and_never_starts_installer(self):
-        spec=importlib.util.spec_from_file_location('https_ci_worker',ROOT/'scripts/remote-install.py')
+        spec=importlib.util.spec_from_file_location('https_ci_worker',ROOT/'distribution/installer/lib/ci_worker.py')
         worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
         import subprocess
         with tempfile.TemporaryDirectory() as directory:

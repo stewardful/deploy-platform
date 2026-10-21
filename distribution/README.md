@@ -4,9 +4,9 @@
 
 | 目录 | 使用场景 | 入口 |
 | --- | --- | --- |
+| `cli/` | 构建统一管理命令 | `python3 -B distribution/cli/package.py` |
 | `release/` | 开发机/CI 构建与打包 | `build.sh`、`package.py`、运行时/代理锁定清单 |
-| `ci/` | 版本、正式发版、工作流检查、交付快照同步 | `version.py`、`release.py`、`vendor-delivery.py` |
-| `vendor/deploy-delivery/` | 独立私有交付仓库的固定版本快照 | SSH 控制、HTTPS 下载、交付组件测试；只从上游同步 |
+| `ci/` | 版本、正式发版、工作流检查、SSH 指令 | `version.py`、`release.py`、`deploy-test.sh` |
 | `installer/` | `.run` 在 Ubuntu 上的安装、升级与自检 | `bootstrap.sh.in`、`install.sh`、`cloudctl` |
 | `installer/systemd/` | 一键安装器的专属运行时与服务 | containerd、Agent、Go/Web、Caddy 四个 unit |
 | [manual](manual/README.md) | 已有运行时的手动集成 | `manual/systemd/`，仅 Agent 和控制端 |
@@ -20,8 +20,10 @@ make installer-test
 make release-build
 ```
 
-生成 `target/dist/*.run`、`.tar.gz`、`.sha256`，不提交 Git。dev 只接收对应架构的平台更新包，按版本复用基础依赖；正式离线包仍包含全部运行时。已有 0.4.1 安装包不因仓库路径重命名而失效，服务器的 `/opt`、`/etc`、`/var/lib` 路径也不随源码目录移动。
+生成 `target/dist/*.run`、`.tar.gz`、`.sha256`，不提交 Git。dev 只接收对应架构的平台更新包，按版本复用基础依赖；正式离线包仍包含全部运行时。仅接受当前安装包和状态格式，不保留历史格式推断或兼容入口。
 
 `release/package.py` 以仓库根为基准收集源文件，安装包内部保持原 `lib/`、`systemd/` 等布局；升级记录和受管理服务名不变。
 
 [安装指南](../docs/install.md) · [手工 Agent 集成](../docs/agent.md) · [测试与上云验收](../docs/acceptance.md)
+
+`cli/` 构建通用 cloudctl 命令；首次安装和后续升级共用 installer/lib 中的下载、状态和安装逻辑。

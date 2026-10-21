@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Installed deploy-delivery command. JSON data only; no uploaded executable code."""
+"""Platform CI control endpoint. JSON data only; no uploaded executable code."""
 import argparse
 import json
 import os
@@ -12,7 +12,7 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from delivery import check_url, read_ticket, record, validate
-import service
+import ci_state as service
 
 MAX_REQUEST = 24 * 1024
 SCRIPTS = Path(__file__).resolve().parent
@@ -42,7 +42,7 @@ def control(payload, action):
             result = subprocess.run(['systemd-run', '--no-block', '--unit='+unit,
                                      '--property=Type=oneshot', '--property=TimeoutStartSec=infinity',
                                      '--property=UMask=0077', '--property=Nice=10', '--property=MemoryHigh=256M',
-                                     '/usr/bin/python3', '-I', '-B', str(SCRIPTS/'remote-install.py'),
+                                     '/usr/bin/python3', '-I', '-B', str(SCRIPTS/'ci_worker.py'),
                                      request['run_id'], request['attempt'], request['commit']], capture_output=True)
             if result.returncode:
                 (stage/'download.json').unlink(missing_ok=True)
@@ -68,20 +68,17 @@ def preflight(arch):
     subprocess.run(['systemctl', 'show-environment'], check=True, capture_output=True)
     if shutil.disk_usage('/opt').free < 2 * 1024**3: raise ValueError('2 GiB free disk required')
     service.stage('1', '1', exists=False)
-    return dict(policy, version=service.VERSION, release=SCRIPTS.parent.name, phase='ready')
+    return dict(policy, release=SCRIPTS.parent.name, phase='ready')
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
-    sub.add_parser('version')
     pre = sub.add_parser('preflight'); pre.add_argument('arch', choices=['amd64', 'arm64'])
     for name in ('start', 'refresh'): sub.add_parser(name)
     for name in ('status', 'logs'):
         job = sub.add_parser(name); job.add_argument('run_id'); job.add_argument('attempt')
-    args = parser.parse_args()
-    if args.action == 'version':
-        print(json.dumps({'protocol': service.PROTOCOL, 'version': service.VERSION})); return
+    args = parser.parse_args(argv)
     if os.geteuid() != 0: raise ValueError('root required')
     os.umask(0o077)
     service.config()
@@ -90,7 +87,7 @@ def main():
         raw = sys.stdin.buffer.read(MAX_REQUEST+1)
         if len(raw) > MAX_REQUEST: raise ValueError('control request too large')
         control(json.loads(raw), args.action)
-        print('PASS: installed delivery tool accepted request')
+        print('PASS: cloudctl accepted CI request')
     else:
         stage = service.stage(args.run_id, args.attempt)
         path = service.trusted(stage/('result.json' if args.action == 'status' else 'install.log'))
@@ -107,4 +104,4 @@ def main():
 if __name__ == '__main__':
     try: main()
     except Exception:
-        raise SystemExit('Delivery command failed; check installed tool, server policy and private job status/logs') from None
+        raise SystemExit('CI control failed; inspect cloudctl delivery status/logs and node configuration') from None

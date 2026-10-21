@@ -13,6 +13,7 @@ sys.dont_write_bytecode = True
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'installer/lib'))
 from delivery import DeliveryError, check_url, validate
 
 

@@ -147,3 +147,33 @@ VERSION=0.5.3 make release-build
 推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送通过 SSH 自动更新指定测试机，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
 
 Ubuntu 26.04 的适配与本地安装、升级验收入口见 [Ubuntu 兼容性验证](ubuntu-compatibility.md)。
+
+
+## 统一 cloudctl 首次安装
+
+首次在开发机从本仓库成功 CI 下载 `cloudctl` 产物（仅包含 cloudctl 和 cloudctl.sha256），将这两个小文件上传服务器。正式发布后也可从本仓库 Release 获取。服务器无需 Git、Rust、Go、Node 或额外交付工具，依赖 Python 3/systemd/cgroup v2。
+
+服务器执行：
+
+```bash
+sha256sum -c cloudctl.sha256
+chmod +x cloudctl
+sudo ./cloudctl install --channel dev --token-file /绝对路径/github.token
+sudo cloudctl status
+```
+
+私有仓库在线下载需要一个有 Actions:read 权限的 GitHub token，保存在服务器私有文件中（0600）；通过 `--token-file` 引用，不能把 token 值写进命令。`--run-id ID` 可固定 dev 构建，省略则选择最新测试通过且产物可用的构建。首次命令明确执行安装，无需再加 --yes。
+
+正式版：`sudo /usr/bin/python3 -I -B ./cloudctl install --channel stable --version X.Y.Z --token-file /绝对路径/github.token`；省略 --version 选择最新正式 Release，私有 Release 需要 Contents:read。公有仓库可省略 token 文件。`--repository` 默认 stewardful/deploy-platform。
+
+已有本地安装包时无需 GitHub token：
+
+```bash
+sudo /usr/bin/python3 -I -B ./cloudctl install --file /绝对路径/deploy-platform-0.5.3-linux-amd64.run
+```
+
+install 只用于首次安装，已有平台会明确拒绝，不进行重置或覆盖。命令默认等待完成；`--no-wait` 仅提交任务。首次安装在独立 systemd 任务中运行，SSH 断开不取消；使用 `sudo cloudctl update status` 和 `sudo cloudctl system-logs install` 查询。若命令等待超时，先查询任务，不重复安装。服务器重启不自动重试中断的安装。
+
+安装后固定入口为 `/usr/local/bin/cloudctl`，日常执行 `cloudctl apps`、`cloudctl status`、`cloudctl upgrade` 和 `cloudctl upgrade-dev`。首次下载器与平台内 CLI 共用源码和安装逻辑；bootstrap 缓存位于 `/opt/deploy-platform/bootstrap`，仅供安装任务固定代码使用，不是另一个产品或常驻服务。首次安装失败会保留该 CLI 入口用于查询日志。
+
+CI 使用同一入口 `cloudctl delivery preflight|start|refresh|status|logs`；任务数据保存在 `/var/lib/deploy-platform/delivery/jobs`，GitHub token 留在 runner。首次在线下载所用服务器 token 是手动操作的凭据；CI 不需要它。

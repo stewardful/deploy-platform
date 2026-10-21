@@ -41,7 +41,7 @@ jobs:
         with:
           name: deploy-platform-linux-${{ vars.TEST_SERVER_ARCH || 'amd64' }}
           path: dist
-      - name: Call preinstalled delivery tool for protected HTTPS deployment
+      - name: Call cloudctl for protected HTTPS deployment
         if: steps.current.outputs.deploy == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,4 +54,4 @@ jobs:
           TEST_SERVER_PORT: ${{ secrets.TEST_SERVER_PORT || '22' }}
           TEST_SERVER_ARCH: ${{ vars.TEST_SERVER_ARCH || 'amd64' }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
-        run: bash distribution/vendor/deploy-delivery/scripts/deploy-test.sh
+        run: bash distribution/ci/deploy-test.sh

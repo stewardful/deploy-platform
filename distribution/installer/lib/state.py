@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -17,6 +18,9 @@ FILES = [
     "/etc/systemd/system/deploy-update.service", "/etc/systemd/system/deploy-update.path",
     "/etc/sysctl.d/90-deploy-platform.conf", "/etc/modules-load.d/deploy-platform.conf"
 ]
+CURRENT = Path('/opt/deploy-platform/current')
+LAUNCHER = Path('/usr/local/bin/cloudctl')
+BOOTSTRAP_ROOT = Path('/opt/deploy-platform/bootstrap')
 RECEIPT = "/etc/deploy-platform/install.json"
 TRANSACTION = "/var/lib/deploy-platform/install-transaction.json"
 BACKUP_ROOT = Path("/var/lib/deploy-platform/backups")
@@ -42,8 +46,10 @@ def write_record(path, value):
 
 
 def begin(destination, cidr):
-    current = Path('/opt/deploy-platform/current')
-    value = {"backup": destination, "cidr": cidr,
+    current = CURRENT
+    launcher = LAUNCHER
+    bootstrap_cli = str(launcher.readlink()) if launcher.is_symlink() and launcher.resolve().parent.parent == BOOTSTRAP_ROOT else None
+    value = {"bootstrap_cli": bootstrap_cli, "backup": destination, "cidr": cidr,
              "previous": str(current.readlink()) if current.is_symlink() else None,
              "stage": "draining" if current.is_symlink() else "activating",
              "active": [u for u in UNITS if subprocess.run(['systemctl', 'is-active', '--quiet', u]).returncode == 0]}
@@ -67,7 +73,14 @@ def recover(source):
         raise ValueError('invalid previous release')
     if any(u not in UNITS for u in value['active']):
         raise ValueError('invalid transaction service')
-    if value.get('stage') == 'draining':
+    bootstrap = value['bootstrap_cli']
+    if bootstrap is not None:
+        target = Path(bootstrap)
+        if target.parent.parent != BOOTSTRAP_ROOT or target.name != 'cloudctl' or not re.fullmatch('[a-f0-9]{64}', target.parent.name):
+            raise ValueError('invalid bootstrap CLI recovery target')
+    if value['stage'] not in ('draining', 'activating'):
+        raise ValueError('invalid installation transaction stage')
+    if value['stage'] == 'draining':
         # No services/files have been changed yet. Never cancel an accepted job
         # merely because draining or a pre-activation business check timed out.
         from agent_http import request
@@ -94,7 +107,7 @@ def recover(source):
             raise ValueError('rollback blocked: live schema is not readable by the old Agent; preserve backups and plan recovery')
     cleanup_upgrade()
     restore(str(backup))
-    current = Path('/opt/deploy-platform/current')
+    current = CURRENT
     for name in ('current.next', 'current.rollback'):
         temporary = current.with_name(name)
         if temporary.is_symlink(): temporary.unlink()
@@ -104,6 +117,10 @@ def recover(source):
         temporary.replace(current)
     else:
         if current.is_symlink(): current.unlink()
+        launcher = LAUNCHER
+        if value['bootstrap_cli']:
+            launcher.unlink(missing_ok=True)
+            launcher.symlink_to(value['bootstrap_cli'])
         Path(RECEIPT).parent.mkdir(parents=True, exist_ok=True)
         receipt(source, value['cidr'], 'failed')
     # A failed first installation of update support must leave no enabled watcher.

@@ -63,17 +63,14 @@ web-e2e: web-build go-build
 .PHONY: installer-test release-build
 
 installer-test:
-	python3 -B distribution/ci/vendor-delivery.py check
-	python3 -B -m unittest discover -s distribution/vendor/deploy-delivery/tests -v
-	# Keep imported pinned vendor sources immutable on Linux as well as macOS.
 	python3 -B -m unittest discover -s tests/installer -v
 	$(MAKE) installer-check
 
 installer-check:
-	bash -n distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/vendor/deploy-delivery/scripts/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
+	bash -n distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
 
 shellcheck:
-	shellcheck -x distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/vendor/deploy-delivery/scripts/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
+	shellcheck -x distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
 
 # Run on a native Linux build machine. Target servers receive only the resulting .run.
 release-build:

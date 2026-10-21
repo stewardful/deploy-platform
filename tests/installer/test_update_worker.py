@@ -15,6 +15,7 @@ import update_worker as worker
 
 class UpdateWorkerTests(unittest.TestCase):
     def setUp(self):
+        manifest = patch('archive.installer_manifest', return_value={'version': '0.5.2'}); self.installer_manifest = manifest.start(); self.addCleanup(manifest.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -104,6 +105,7 @@ class UpdateWorkerTests(unittest.TestCase):
     def test_same_version_dev_can_promote_to_stable_but_stable_cannot_reinstall(self):
         current = self.root/'manifest.json'
         request = dict(self.request, version='0.5.3')
+        self.installer_manifest.return_value = {'version': '0.5.3'}
         for channel in ('dev', 'stable'):
             current.write_text(json.dumps({'version': '0.5.3', 'arch': 'arm64', 'build': {'channel': channel}}))
             with patch.object(worker, 'CURRENT', current), patch.object(worker, 'TRANSACTION', self.root/'transaction'), patch.object(worker.platform, 'machine', return_value='aarch64'), patch.object(worker, 'settings', return_value=('owner/repo','token')), patch.object(worker, 'discover', return_value={}), patch.object(worker, 'download'), patch.object(worker.subprocess, 'run', side_effect=lambda argv, **kw: current.write_text(json.dumps({'version': '0.5.3', 'arch': 'arm64', 'build': {'channel': 'stable'}})) if '--upgrade' in argv else None) as runner:

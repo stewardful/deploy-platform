@@ -70,7 +70,7 @@ PYPERMISSIONS
     install -m 0600 "$generated/nerdctl.toml" /etc/deploy-platform/nerdctl.toml
     install -m 0600 "$generated/10-cloud.conflist" /etc/deploy-platform/cni/10-cloud.conflist
     install -m 0755 "$generated/nerdctl" /opt/deploy-platform/nerdctl
-    install -d -m 0700 /var/lib/deploy-platform/updates
+    install -d -m 0700 /var/lib/deploy-platform/updates /var/lib/deploy-platform/delivery /var/lib/deploy-platform/delivery/jobs
     for unit in deploy-containerd.service deploy-agent.service deploy-control.service deploy-proxy.service deploy-update.service deploy-update.path; do
         install -m 0644 "$SOURCE/systemd/$unit" "/etc/systemd/system/$unit"
     done

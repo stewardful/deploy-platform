@@ -44,13 +44,13 @@ def metadata(repo, token, path):
     return json.loads(data)
 
 
-def discover(run_id=None):
+def discover(run_id=None, *, initial=False):
     if run_id is not None and (not isinstance(run_id, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', run_id)):
         raise ValueError('invalid run ID')
     repo, token = worker.settings()
-    current = json.loads(worker.CURRENT.read_text())
+    current = None if initial else json.loads(worker.CURRENT.read_text())
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
-    if arch is None or current['arch'] != arch: raise ValueError('node architecture mismatch')
+    if arch is None or current is not None and current['arch'] != arch: raise ValueError('node architecture mismatch')
     if run_id is not None:
         return candidate(repo, token, arch, run_id, metadata(repo, token, 'actions/runs/'+run_id))
     # Small pages keep GitHub's rich run metadata below the existing response cap.
@@ -99,7 +99,7 @@ def candidate(repo, token, arch, run_id, run):
     # A failed SSH deployment may still have a good build. Require the reusable build/test
     # jobs to have succeeded, independently of the deployment job's conclusion.
     jobs = metadata(repo, token, 'actions/runs/'+run_id+'/jobs?per_page=100')['jobs']
-    required = ('build / test', 'build / package (ubuntu-24.04'+('-arm' if arch == 'arm64' else '')+', '+arch+')')
+    required = ('build / cli', 'build / test', 'build / package (ubuntu-24.04'+('-arm' if arch == 'arm64' else '')+', '+arch+')')
     for name in required:
         matches = [job for job in jobs if job.get('name') == name]
         if len(matches) != 1 or matches[0].get('conclusion') != 'success': raise CandidateUnavailable('successful build and tests required')
@@ -129,8 +129,9 @@ def extract(source, stage, request):
 
 def execute(request):
     # Recheck source, tests, architecture, artifact ID, digest and size before download.
-    fresh = discover(request['run_id'])
-    if fresh != {k: v for k, v in request.items() if k != 'phase'}: raise ValueError('dev build changed after approval; inspect again')
+    initial = request.get('operation') == 'install'
+    fresh = discover(request['run_id'], initial=True) if initial else discover(request['run_id'])
+    if fresh != {k: v for k, v in request.items() if k not in ('phase', 'operation')}: raise ValueError('dev build changed after approval; inspect again')
     repo, token = worker.settings()
     worker.report('', 'downloading', '正在下载并校验 dev 构建；应用继续运行')
     with tempfile.TemporaryDirectory(prefix='cloud-dev-update-', dir=worker.DOWNLOAD_ROOT) as directory:
@@ -145,10 +146,7 @@ def execute(request):
         if (candidate.get('version') != version or candidate.get('arch') != request['arch'] or
                 candidate.get('build') != {'channel': 'dev', 'commit': request['commit']}):
             raise ValueError('installer build provenance mismatch; rebuild dev with current packaging')
-        worker.report(version, 'verifying', '正在检查 dev 安装包')
-        subprocess.run(['/usr/bin/bash', str(installer), '--check'], check=True, timeout=120)
-        worker.report(version, 'installing', '正在使用既有升级保护安装 dev 构建')
-        subprocess.run(['/usr/bin/bash', str(installer), '--upgrade', '--skip-apt'], check=True)
+        worker.install_payload(installer, version, initial=initial)
     installed = json.loads(worker.CURRENT.read_text())
     if (installed['version'] != version or installed['arch'] != request['arch'] or
             installed.get('build') != candidate['build'] or worker.TRANSACTION.exists()):

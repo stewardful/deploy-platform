@@ -49,7 +49,7 @@ ssh-keygen -lf test_known_hosts
 
 服务器使用 Ubuntu 24.04 或 26.04 LTS/systemd，确认架构、磁盘和端口满足 [安装指南](install.md)。SSH 用户需要 `sudo -n true` 成功，并能无交互执行安装所需的 root 管理命令；root 登录也需要服务器安装 sudo。确保 Python 3、sudo 和 systemd-run 可用，部署公钥已加入该用户的 authorized_keys。
 
-**先独立安装交付工具**：按 [deploy-delivery 安装说明](https://github.com/stewardful/deploy-delivery#首次安装不由项目-ci-自动执行) 从辅助仓库成功 CI 下载工具包，在服务器校验摘要并安装。绑定 `--repository stewardful/deploy-platform --arch amd64`（arm64 节点相应替换架构）。服务器执行 `sudo /usr/local/bin/deploy-delivery preflight amd64` 应返回 protocol=1、phase=ready 和正确仓库。项目 CI 不远程 bootstrap 工具，缺少命令、协议或仓库/架构不匹配会在签发下载授权前失败。两个仓库不需要 GitHub App 或跨仓库 Token。
+**首次只使用 cloudctl**：从本仓库成功 CI 的 `cloudctl` 产物获取命令和摘要，在服务器校验后执行 `sudo /usr/bin/python3 -I -B ./cloudctl install --channel dev --token-file /绝对路径/github.token`，或使用 `--file /绝对路径/平台.run` 离线安装。安装完成后用 `sudo cloudctl delivery preflight amd64` 检查节点。命令会输出当前仓库、架构与 `phase=ready`；CI 只向已经安装的平台发指令，不上传执行代码。详见 [首次安装](install.md#统一-cloudctl-首次安装)。
 
 首次部署可自动调用安装器安装依赖；已有平台时使用 `--upgrade --skip-apt`。运行项目须按 [升级保障](upgrade.md) 配置 `/etc/deploy-platform/upgrade-checks.json`，缺少探针、schema/运行时不兼容、任务未排空或验证失败都使 Actions 失败，保护规则不会因 dev 环境而跳过。
 
@@ -69,9 +69,9 @@ main 发版前提高 `Cargo.toml` 的 workspace 与内部组件版本，更新 C
 
 ## SSH 中断与排错
 
-[SSH 控制脚本](../distribution/vendor/deploy-delivery/scripts/deploy-test.sh) 在传递下载授权前完成主机预检。CI 的 [产物提供器](../distribution/vendor/deploy-delivery/scripts/artifact-request.py) 固定仓库、dev 分支、运行编号、提交、架构、产物 ID、ZIP 摘要/大小和安装包摘要/大小。开发产物只包含完整平台更新包 `.run` 与 `.sha256`，不含 containerd/nerdctl/runc/CNI/Caddy 二进制，保留 3 天，避免再下载内容重复的 `.tar.gz`；正式 Release 仍发布全部资产。
+[SSH 控制脚本](../distribution/ci/deploy-test.sh) 在传递下载授权前完成主机预检。CI 的 [产物提供器](../distribution/ci/artifact-request.py) 固定仓库、dev 分支、运行编号、提交、架构、产物 ID、ZIP 摘要/大小和安装包摘要/大小。开发产物只包含完整平台更新包 `.run` 与 `.sha256`，不含 containerd/nerdctl/runc/CNI/Caddy 二进制，保留 3 天，避免再下载内容重复的 `.tar.gz`；正式 Release 仍发布全部资产。
 
-项目 CI 的 SSH 只调用预装命令并传递有限的 JSON 元数据/临时下载授权，不上传执行代码，也不通过 SCP 传平台包。[已安装的控制入口](../distribution/vendor/deploy-delivery/scripts/remote-control.py) 校验协议与绑定仓库，创建 root 私有任务目录，并通过独立 systemd unit、固定的不可变版本路径启动 [执行器](../distribution/vendor/deploy-delivery/scripts/remote-install.py)。[下载组件](../distribution/vendor/deploy-delivery/scripts/delivery.py) 通过 HTTPS 流式下载、断点恢复，验证 ZIP 摘要，再从封闭文件清单安全解包并验证安装包摘要。校验完成后才调用原 `.run --check` 和 `.run --upgrade`，已有节点加 `--skip-apt`，不跳过兼容性、维护排空、备份、业务验证与失败回退。
+项目 CI 的 SSH 只调用预装命令并传递有限的 JSON 元数据/临时下载授权，不上传执行代码，也不通过 SCP 传平台包。[已安装的控制入口](../distribution/installer/lib/ci_control.py) 校验协议与绑定仓库，创建 root 私有任务目录，并通过独立 systemd unit、固定的不可变版本路径启动 [执行器](../distribution/installer/lib/ci_worker.py)。[下载组件](../distribution/installer/lib/delivery.py) 通过 HTTPS 流式下载、断点恢复，验证 ZIP 摘要，再从封闭文件清单安全解包并验证安装包摘要。校验完成后才调用原 `.run --check` 和 `.run --upgrade`，已有节点加 `--skip-apt`，不跳过兼容性、维护排空、备份、业务验证与失败回退。
 
 下载默认最多 15 分钟，独立下载子进程有硬超时；网络错误最多 4 次尝试，接受 Range 时续传，不支持 Range 时重新写入，禁止拼接错误内容。过期地址通过 `awaiting_url` 请求 CI 刷新，最多 3 次，每次等待最多 90 秒且受总下载时限约束。CI 已断开时无法获取新授权，下载会有界失败，不开始安装。没有后台轮询服务、timer 或新的平台 API。
 
@@ -83,8 +83,8 @@ Actions 等待最多四十分钟，只读查询阶段和下载进度；必要时
 
 ```bash
 sudo systemctl status deploy-platform-ci-RUNID-ATTEMPT.service
-sudo /usr/local/bin/deploy-delivery status RUNID ATTEMPT
-sudo /usr/local/bin/deploy-delivery logs RUNID ATTEMPT
+sudo /usr/local/bin/cloudctl delivery status RUNID ATTEMPT
+sudo /usr/local/bin/cloudctl delivery logs RUNID ATTEMPT
 ```
 
 结果包含部署的完整提交 SHA。成功删除下载的临时安装包，失败保留以供恢复。安装器的 release 与备份按原策略保留，不自动删除业务数据；频繁测试时应检查磁盘。失败回退规则与网页升级一致，未完成的安装事务需按升级指南恢复。
@@ -95,7 +95,7 @@ sudo /usr/local/bin/deploy-delivery logs RUNID ATTEMPT
 
 触发器和并发行为依据 [GitHub 工作流事件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows) 与 [部署并发说明](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments)。
 
-本地组件测试覆盖下载边界、TLS/来源限制、ZIP 路径与链接、摘要/长度、URL 刷新、续传与总超时。PR 在原生 amd64 节点额外验证真实 GitHub ZIP 摘要/大小与解包契约。[ci-ssh-smoke.sh](../distribution/tests/ci-ssh-smoke.sh) 在隔离 2 CPU / 2 GiB Ubuntu 节点使用临时密钥和仅该节点信任的 HTTPS 端点，运行真实 SSH、下载、systemd 和安装器，先验证缺少工具时拒绝部署、独立安装与重装、坏工具候选保留旧入口、运行中更新工具和仅数据传输，再验证错误主机密钥、损坏包拒绝、地址过期刷新、传输中断续传、并发拒绝，以及运行端断线后继续完成升级。GitHub 元数据授权在此隔离测试中使用 fixture；真实 API 与 ZIP 格式由独立 PR 契约测试覆盖。
+本地组件测试覆盖下载边界、TLS/来源限制、ZIP 路径与链接、摘要/长度、URL 刷新、续传与总超时。PR 在原生 amd64 节点额外验证真实 GitHub ZIP 摘要/大小与解包契约。[ci-ssh-smoke.sh](../distribution/tests/ci-ssh-smoke.sh) 在隔离 2 CPU / 2 GiB Ubuntu 节点使用临时密钥和仅该节点信任的 HTTPS 端点，运行真实 SSH、下载、systemd 和安装器，先验证未安装平台时拒绝 CI 部署、cloudctl 首次安装和仅数据传输，再验证错误主机密钥、损坏包拒绝、地址过期刷新、传输中断续传、并发拒绝，以及运行端断线后继续完成升级。GitHub 元数据授权在此隔离测试中使用 fixture；真实 API 与 ZIP 格式由独立 PR 契约测试覆盖。
 
 ```bash
 bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-VERSION-linux-ARCH.run
@@ -103,23 +103,7 @@ bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-VERSION-linux-ARCH.
 
 该命令仅操作自身创建的 Docker 测试节点，安装包旁需有对应 `.sha256`；不会复用用户服务器。
 
-## 独立交付工具与基础依赖复用
 
-交付脚本和组件测试的权威来源是私有仓库 [stewardful/deploy-delivery](https://github.com/stewardful/deploy-delivery)。平台提交经过审查的 `distribution/vendor/deploy-delivery/` 源码快照，`deploy-delivery.lock.json` 固定完整提交 SHA 和每个文件的 SHA256；`make installer-test` 首先校验快照，再执行上游交付测试。正常 PR/dev/main 不访问另一个私有仓库，不增加 Secret。不要直接修改快照，先在辅助仓库提交并验证，再显式同步：
+## 单仓库维护
 
-```bash
-python3 distribution/ci/vendor-delivery.py sync --source /ABS/deploy-delivery --revision FULL_40_CHARACTER_COMMIT_SHA
-make installer-test
-```
-
-两个仓库的 CI **不互相触发，不自动创建组件更新 PR，也不需要 GitHub App 或跨仓库写权限**。辅助仓库独立维护和测试交付工具；平台 dev 构建自身产物，通过 SSH 通知服务器，由服务器通过 HTTPS 下载并执行受保护的升级。服务器工具现已支持独立离线包安装和版本更新；客户端以 protocol=1 与它通信。平台仍固定 CI 客户端和测试快照，但正常 dev 不构建、不上传、不安装服务器交付工具。辅助仓库单独生成约 13 KiB 的工具包，首次安装和工具更新按其 README 独立操作。工具更新先验证候选，再原子切换 `/opt/deploy-delivery/current`，保留旧代码和 `/var/lib/deploy-delivery/jobs`，运行中任务继续使用接受时的版本；工具安装不触碰平台服务或数据。
-
-`dev` 使用 `PACKAGE_KIND=platform-update`：完整包含平台 Agent、控制端、Web、安装器、迁移和服务配置，但不下载或打包外部运行时二进制。`.run --check` 只校验更新包自身，不联网；成功不代表基础依赖已准备好或已安装。服务器在持有安装锁时，按清单的版本、架构和锁定摘要补齐依赖，再生成完整候选版本，通过原升级保护后才切换服务。不会在服务器编译平台源码。
-
-已有相同依赖的完整安装版本通过全部文件校验后可直接复用。持久缓存位于 `/var/cache/deploy-platform/dependencies/`，root 私有，按组件、架构和锁清单摘要区分版本，每次复用校验文件清单和摘要；损坏缓存重建，绝不把损坏内容装进候选版本。新安装或缺失依赖时从锁定的 nerdctl/Caddy 官方 GitHub HTTPS 归档下载并验证原始归档 SHA256，提取固定组件，不读取 GitHub 私有 token。依赖下载流式进行，单个归档不超过 512 MiB、最多 3 次尝试，整个依赖准备子进程有 960 秒硬时限；失败发生在维护、数据库备份和服务切换之前。它不是后台下载服务。
-
-首次 dev 安装需要下载上游基础依赖，仍会受 GitHub 网络速度影响；之后同版本依赖无需重复下载。这里复用的是官方已发布的归档和本地校验缓存，不额外维护一份自有基础依赖 Release。缓存不会自动删除，运维可在无安装任务时删除依赖缓存以释放空间，下次按需重建；不要删除 current/releases 或业务数据来清缓存。
-
-`main` 和手动 `make release-build` 默认 `PACKAGE_KIND=offline`，继续生成含全部依赖的 `.run`、`.tar.gz` 和 `.sha256`。离线包无需下载运行时，但操作系统软件包和首次部署业务镜像仍需提前准备或联网。PR 同时构建、校验并在 Ubuntu 24.04/26.04 上安装更新包和离线包；还验证阻断外部 HTTPS 后仍可重复安装，以及真实 SSH/TLS 故障链路。Ubuntu 26.04 还验证离线安装 → 同提交更新包的升级流程，部署真实前后端、PostgreSQL/Redis 和隔离 CA 的 HTTPS，确认数据保留及注入业务故障后的回退；同提交验收不等同于跨历史版本迁移或公网证书验收。Rust crates、Go packages 和前端组件继续编译进平台程序，不拆成每次独立发布的资产。运行时版本变化仍受现有升级兼容性限制，不能通过缓存机制绕过计划迁移要求。
-
-隔离 systemd-in-Docker 节点统一通过 `distribution/tests/node-exec.sh` 执行命令：将测试命令移入 `init.scope`，通过 systemd 恢复资源控制器，避免 Docker exec 将命令留在根 cgroup、关闭子控制器后出现 `pids.max` 缺失。入口拒绝非测试节点，保留参数与标准输入；这不是生产安装配置或资源限制的放宽。`cloudctl test smoke` 现在在首次运行和 Agent 恢复后都读取实际 cgroup v2 的 CPU/内存/PID 限制，避免仅检查容器配置而误报资源约束通过。
+CLI、CI 控制端、下载组件、安装器和测试全部在本仓库维护。`distribution/cli` 构建通用 cloudctl；`distribution/ci` 负责 runner 端指令；`distribution/installer/lib` 负责节点逻辑。没有独立工具安装包、跨仓库同步、GitHub App 或额外 CI Secret。正式 Release 同时分发 cloudctl、其校验文件及两种架构的完整离线平台包。

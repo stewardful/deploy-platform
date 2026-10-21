@@ -52,6 +52,7 @@ class ArchiveTests(unittest.TestCase):
             required = ["bin/agentd", "bin/agentctl", "bin/controld", "web/index.html"]
             required += ["runtime/bin/" + n for n in ("containerd", "containerd-shim-runc-v2", "ctr", "nerdctl", "runc")]
             required += ["runtime/libexec/cni/" + n for n in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning")]
+            required += list(archive.CURRENT_CLI_FILES)
             required += ['proxy/bin/caddy', 'proxy/LICENSE', 'proxy/proxy.lock.json', 'systemd/deploy-proxy.service',
                          'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py',
                          'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path']

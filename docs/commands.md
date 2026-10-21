@@ -77,7 +77,7 @@ sudo cloudctl update status
 
 `upgrade-dev` 最多搜索最近 100 个已结束的 dev 工作流，按构建序号而非重跑完成时间排序。无可用候选时失败；指定 `--run-id` 时不搜索、不回退到其他构建。鉴权、限流、网络或响应损坏会中止搜索。无编号的预览与 `--yes` 是两次独立查询；要批准与预览完全相同的构建，请把返回的 `run_id` 传给 `--run-id`。任务入队后已固定运行编号、提交及产物身份，执行器不会再次选择“最新”。
 
-`upgrade-dev` 直接读取已配置仓库的 GitHub Actions 元数据，不依赖 Go 控制端，也不需要服务器另装 deploy-delivery。它复用平台更新 path/service，按需执行，无新增常驻服务或轮询。它只更新平台，不更新业务应用镜像。当前没有独立 alpha/beta 发布通道，不用这些名字代指 dev。
+`upgrade-dev` 直接读取已配置仓库的 GitHub Actions 元数据，不依赖 Go 控制端，下载组件随平台维护。它复用平台更新 path/service，按需执行，无新增常驻服务或轮询。它只更新平台，不更新业务应用镜像。当前没有独立 alpha/beta 发布通道，不用这些名字代指 dev。
 
 私有仓库手动 dev 下载需要服务器凭据对该仓库有 **Actions: read**；正式 Release 读取需要 **Contents: read**。共用 `/etc/deploy-platform/updates.json` 的仓库和私有 token 文件配置，详见 [更新指南](updates.md)。CI 自带临时 GitHub token 不会自动提供给服务器，不能仅凭仓库 URL 下载私有产物。
 
@@ -96,3 +96,8 @@ sudo cloudctl update status
 旧 `apply/list/verify/doctor/plan` 及平铺的 `secrets/volumes/routes/secret-create/route-set/route-delete`、旧测试命令和 `logs agent` 已从 cloudctl 移除。独立 `agentctl` 的命令协议不变：例如 `agentctl apply`、`agentctl plan` 仍供其他项目复用。
 
 独立 Agent 安装不需要 cloudctl、Go 或 Web。日常 cloudctl 应用命令只依赖 agentd 的 Unix Socket 和单写入者任务流程；部署方式见 [独立 Agent](agent.md)、[一键安装](install.md)。
+
+
+首次安装：`cloudctl install --channel dev|stable` 或 `cloudctl install --file INSTALLER.run`，具体获取命令、凭据和成功信号见 [统一首次安装](install.md#统一-cloudctl-首次安装)。首次安装与后续升级是同一 CLI；`install` 不允许覆盖已有平台。CI 控制命令为 `cloudctl delivery`，不是另一个需要安装的工具。
+
+候选 dev 构建必须通过 cloudctl 构建、完整测试及对应架构打包；缺少其中任何任务均不接受。

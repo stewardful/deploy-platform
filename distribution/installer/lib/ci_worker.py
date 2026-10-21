@@ -12,7 +12,7 @@ sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from delivery import DeliveryError, record, validate
-import service
+import ci_state as service
 
 
 def verify(stage):
@@ -44,30 +44,27 @@ def install(stage, commit):
     try:
         with (stage / 'install.log').open('w') as log:
             try:
-                if (stage/'request.json').exists():
-                    request = validate(json.loads((stage/'request.json').read_text()))
-                    if request['commit'] != commit: raise DeliveryError('commit_mismatch')
-                    status.update(version=request['version'], artifact_id=request['artifact_id'])
-                    # Enforce a wall-clock limit even during DNS/TLS/redirect stalls.
-                    # Kill only the download child; never put a timeout around an active installer.
-                    try:
-                        subprocess.run(['/usr/bin/python3', str(Path(__file__).resolve().with_name('delivery.py')), str(stage)], check=True, timeout=request['download_seconds'], stdout=log, stderr=subprocess.STDOUT)
-                    except subprocess.TimeoutExpired:
-                        raise DeliveryError('download_timeout') from None
-                    except subprocess.CalledProcessError:
-                        child = json.loads(result.read_text())
-                        status.update(child)
-                        raise DeliveryError(child.get('error_code', 'download_failed')) from None
-                    status.update(json.loads(result.read_text()))
+                request = validate(json.loads((stage/'request.json').read_text()))
+                if request['commit'] != commit: raise DeliveryError('commit_mismatch')
+                status.update(version=request['version'], artifact_id=request['artifact_id'])
+                # Enforce a wall-clock limit even during DNS/TLS/redirect stalls.
+                # Kill only the download child; never put a timeout around an active installer.
+                try:
+                    subprocess.run(['/usr/bin/python3', str(Path(__file__).resolve().with_name('delivery.py')), str(stage)], check=True, timeout=request['download_seconds'], stdout=log, stderr=subprocess.STDOUT)
+                except subprocess.TimeoutExpired:
+                    raise DeliveryError('download_timeout') from None
+                except subprocess.CalledProcessError:
+                    child = json.loads(result.read_text())
+                    status.update(child)
+                    raise DeliveryError(child.get('error_code', 'download_failed')) from None
+                status.update(json.loads(result.read_text()))
                 verify(stage)
                 report('installing')
                 # Download credentials are no longer needed once the archive has been verified.
                 (stage/'download.json').unlink(missing_ok=True)
-                command = ['/usr/bin/bash', str(stage / 'installer.run')]
-                subprocess.run(command + ['--check'], check=True, stdout=log, stderr=subprocess.STDOUT)
-                args = ['--upgrade']
-                if Path('/etc/deploy-platform/install.json').exists(): args.append('--skip-apt')
-                subprocess.run(command + args, check=True, stdout=log, stderr=subprocess.STDOUT)
+                import update_worker
+                update_worker.install_payload(stage/'installer.run', status['version'], output=log,
+                                              progress=lambda version, phase, message: report(phase))
             except Exception as error:
                 code = error.code if isinstance(error, DeliveryError) else 'installer_or_validation_failed'
                 log.write('Deployment failed: '+code+'\n')
@@ -118,4 +115,4 @@ def main():
 if __name__ == '__main__':
     try: main()
     except Exception:
-        raise SystemExit('CI deployment failed; inspect deploy-delivery status/logs') from None
+        raise SystemExit('CI deployment failed; inspect cloudctl status/logs') from None

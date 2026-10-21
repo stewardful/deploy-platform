@@ -14,6 +14,13 @@ import tarfile
 
 MAX_BYTES = 2 * 1024**3
 MAX_FILES = 5000
+CURRENT_CLI_FILES = {'lib/node_cli.py', 'lib/first_install.py', 'lib/ci_control.py', 'lib/ci_worker.py', 'lib/ci_state.py', 'lib/delivery.py'}
+
+
+def require_current(manifest):
+    if not isinstance(manifest, dict) or not isinstance(manifest.get('files'), dict) or not CURRENT_CLI_FILES.issubset(manifest['files']):
+        raise ValueError('installer lacks the current cloudctl components; rebuild from current source')
+    contract(manifest)
 
 
 class UpgradeError(ValueError):
@@ -99,6 +106,7 @@ def installer_manifest(path):
                         raise ValueError('invalid installer manifest')
                     result = json.loads(payload.extractfile(member).read())
         if result is None: raise ValueError('installer manifest missing')
+        require_current(result)
         return result
 
 
@@ -127,7 +135,7 @@ def verify(directory, expected_arch=None):
     required.update({'proxy/bin/caddy', 'proxy/LICENSE', 'proxy/proxy.lock.json', 'systemd/deploy-proxy.service',
                      'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py',
                      'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path'})
-    contract(manifest)
+    require_current(manifest)
     if not all(isinstance(manifest.get(key), dict) for key in ('runtime', 'proxy')):
         raise ValueError('release missing dependency locks')
     required.update("runtime/libexec/cni/" + name for name in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning"))

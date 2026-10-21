@@ -8,9 +8,7 @@ import stat
 from contextlib import contextmanager
 
 PROTOCOL = 1
-VERSION = '0.1.0'
-CONFIG = Path('/etc/deploy-delivery/config.json')
-JOBS = Path('/var/lib/deploy-delivery/jobs')
+JOBS = Path('/var/lib/deploy-platform/delivery/jobs')
 LAUNCH_LOCK = Path('/run/lock/deploy-platform-ci-launch.lock')
 WORKER_LOCK = Path('/run/lock/deploy-platform-ci.lock')
 
@@ -24,13 +22,10 @@ def trusted(path, *, directory=False, private=True):
 
 
 def config():
-    trusted(CONFIG.parent, directory=True)
-    value = json.loads(trusted(CONFIG).read_text())
-    if set(value) != {'protocol', 'repository', 'arch'} or value['protocol'] != PROTOCOL:
-        raise ValueError('unsupported server configuration')
-    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', value['repository']) or value['arch'] not in ('amd64', 'arm64'):
-        raise ValueError('invalid server policy')
-    return value
+    from update_worker import settings, CURRENT
+    repository, _ = settings(read_token=False)
+    manifest = json.loads(trusted(CURRENT, private=False).read_text())
+    return {'protocol': PROTOCOL, 'repository': repository, 'arch': manifest['arch']}
 
 
 def stage(run_id, attempt, *, exists=True):

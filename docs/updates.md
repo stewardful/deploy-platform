@@ -80,4 +80,4 @@ worker 在下载前再次核对运行编号、提交、产物 ID、大小和 Git
 
 dev 不增加 API、常驻服务或版本轮询；CLI 原子提交同一个更新队列，执行器继续调用原安装器 `--check`、`--upgrade --skip-apt`。Web 和 CLI 的提交由跨进程锁串行化，安装器节点锁同时覆盖离线包和独立 CI 工具。更新结果包含 channel/run_id/commit，失败不会自动重试。
 
-手动 CLI 不需要安装独立 deploy-delivery。它只是复用仓库固定版本的无状态 ZIP/URL 组件，该组件随平台包一起安装；现有 CI 的 SSH 交付工具仍按 [CI/CD](ci-cd.md) 独立使用，本次不改变它的部署约定。首次使用新命令仍需先安装包含这些命令的版本。
+首次安装与后续升级统一为 cloudctl。首次执行 `cloudctl install --channel dev|stable` 或 `--file`，之后使用 upgrade/upgrade-dev；全部共用下载组件、受保护安装器和任务状态。CI 同样使用平台自带的 cloudctl delivery，不依赖外部工具仓库。详见 [统一首次安装](install.md#统一-cloudctl-首次安装)。

@@ -58,6 +58,10 @@ def publish(repo, version, commit, directory):
             if not path.is_file() or path.is_symlink():
                 raise ReleaseError('both complete architecture artifacts required')
             assets.append(str(path))
+    for name in ('cloudctl', 'cloudctl.sha256'):
+        path = directory/name
+        if path.is_symlink() or not path.is_file(): raise ReleaseError('cloudctl and checksum required')
+        assets.append(str(path))
     if tag_commit(repo, tag) is None:
         api(repo, 'git/refs', {'ref': 'refs/tags/' + tag, 'sha': commit})
     # A default branch of dev must never influence release content or tag target.

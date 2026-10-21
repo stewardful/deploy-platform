@@ -14,7 +14,10 @@
 | `lib/upgrade.py` | 排空、基线、停止边界及升级后验证的组装入口 |
 | `lib/state.py` / `activate.sh` | 受管理文件快照、事务、激活和失败恢复 |
 | `systemd/` | 一键安装器专用的四服务模板 |
-| `cloudctl` | 已安装节点的管理/诊断命令 |
+| `cloudctl` / `lib/node_cli.py` | 统一首次安装、管理和升级命令 |
+| `lib/first_install.py` | 首次安装的配置/提交/等待，复用更新 worker 与安装器 |
+| `lib/ci_control.py` / `ci_worker.py` / `ci_state.py` | 平台自带的 CI 控制、独立任务与私有状态 |
+| `lib/delivery.py` | 有界 HTTPS 下载、续传和封闭 ZIP 校验 |
 | `*_smoke.py` / `smoke.py` | 节点健康、普通应用和数据库/四服务验收 |
 
 不可变发布目录不能写入 Python 缓存。秘密、业务数据和证书存储位于独立私有目录；升级保留不等于业务备份。手动模板位于 [manual](../manual/README.md)，不能覆盖本安装器管理的 unit。

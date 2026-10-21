@@ -27,6 +27,19 @@ jobs:
         env:
           BUILD_ARCH: ${{ inputs.arch }}
         run: python3 distribution/ci/version.py
+  cli:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 -B distribution/cli/package.py
+      - run: python3 -I -B target/cli/cloudctl install --help && python3 -I -B target/cli/cloudctl version
+      - run: cd target/cli && sha256sum -c cloudctl.sha256
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cloudctl
+          path: target/cli/*
+          if-no-files-found: error
+          retention-days: 14
   test:
     needs: validate
     runs-on: ubuntu-24.04

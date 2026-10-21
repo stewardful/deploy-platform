@@ -31,6 +31,7 @@ class CIPolicyTests(unittest.TestCase):
     def test_publish_pins_tag_to_sha_and_only_then_publishes(self):
         with tempfile.TemporaryDirectory() as directory:
             dist=Path(directory)
+            for name in ('cloudctl', 'cloudctl.sha256'): (dist/name).touch()
             for arch in ('amd64','arm64'):
                 for suffix in ('.run','.tar.gz','.sha256'):
                     (dist/f'deploy-platform-1.0.0-linux-{arch}{suffix}').touch()
@@ -45,6 +46,8 @@ class CIPolicyTests(unittest.TestCase):
     def test_same_commit_rerun_never_overwrites_published_assets(self):
         with tempfile.TemporaryDirectory() as directory:
             dist=Path(directory);assets=[]
+            for name in ('cloudctl', 'cloudctl.sha256'):
+                (dist/name).touch(); assets.append({'name': name})
             for arch in ('amd64','arm64'):
                 for suffix in ('.run','.tar.gz','.sha256'):
                     name=f'deploy-platform-1.0.0-linux-{arch}{suffix}'

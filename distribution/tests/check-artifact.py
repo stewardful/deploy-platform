@@ -8,9 +8,9 @@ import sys
 import tempfile
 
 sys.dont_write_bytecode = True
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'vendor/deploy-delivery/scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'installer/lib'))
 import delivery
-spec = importlib.util.spec_from_file_location('artifact_request', Path(__file__).resolve().parents[1]/'vendor/deploy-delivery/scripts/artifact-request.py')
+spec = importlib.util.spec_from_file_location('artifact_request', Path(__file__).resolve().parents[1]/'ci/artifact-request.py')
 provider = importlib.util.module_from_spec(spec);spec.loader.exec_module(provider)
 
 

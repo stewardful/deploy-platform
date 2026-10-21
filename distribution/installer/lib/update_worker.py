@@ -45,7 +45,7 @@ def private_read(path, limit):
     return data
 
 
-def settings():
+def settings(*, read_token=True):
     cfg = {'repository': 'stewardful/deploy-platform', 'token_file': ''}
     if CONFIG.exists() or CONFIG.is_symlink():
         cfg.update(json.loads(private_read(CONFIG, 4096)))
@@ -53,7 +53,7 @@ def settings():
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo) or '..' in repo:
         raise ValueError('invalid configured repository')
     token = ''
-    if cfg['token_file']:
+    if cfg['token_file'] and read_token:
         path = Path(cfg['token_file'])
         if not path.is_absolute():
             raise ValueError('absolute token path required')
@@ -141,12 +141,17 @@ def execute(request):
     version = request.get('version', '')
     if not re.fullmatch(VERSION, version):
         raise ValueError('invalid version')
-    current = json.loads(CURRENT.read_text())
-    if (tuple(map(int, version.split('.'))) < tuple(map(int, current['version'].split('.'))) or
-            (version == current['version'] and current.get('build', {}).get('channel') != 'dev')):
-        raise ValueError('only newer releases or same-version dev-to-stable promotion allowed')
+    initial = request.get('operation') == 'install'
+    if initial:
+        if CURRENT.exists(): raise ValueError('platform already installed')
+        current = None
+    else:
+        current = json.loads(CURRENT.read_text())
+        if (tuple(map(int, version.split('.'))) < tuple(map(int, current['version'].split('.'))) or
+                (version == current['version'] and current.get('build', {}).get('channel') != 'dev')):
+            raise ValueError('only newer releases or same-version dev-to-stable promotion allowed')
     arch = {'aarch64': 'arm64', 'x86_64': 'amd64'}.get(platform.machine())
-    if arch is None or current['arch'] != arch:
+    if arch is None or current is not None and current['arch'] != arch:
         raise ValueError('unsupported node architecture')
     repo, token = settings()
     if repo != request.get('repository'):
@@ -156,17 +161,43 @@ def execute(request):
     with tempfile.TemporaryDirectory(prefix='cloud-update-', dir=DOWNLOAD_ROOT) as directory:
         installer = Path(directory) / 'installer.run'
         download(repo, token, asset, installer)
-        # No shell interpolation or browser-supplied path/options. Existing installer
-        # validates its embedded archive before performing any host changes.
-        report(version, 'verifying', '正在检查安装包完整性')
-        subprocess.run(['/usr/bin/bash', str(installer), '--check'], check=True, timeout=120)
-        report(version, 'installing', '正在安全升级；管理页面与公网入口可能短暂断开')
-        # Installer's own bounded drain/verify and ERR trap own failure recovery.
-        subprocess.run(['/usr/bin/bash', str(installer), '--upgrade', '--skip-apt'], check=True)
+        install_payload(installer, version, initial=initial)
     installed = json.loads(CURRENT.read_text())
     if installed['version'] != version or installed.get('build', {}).get('channel') == 'dev' or TRANSACTION.exists():
         raise ValueError('installation has not committed')
     report(version, 'succeeded', '升级完成，已有项目验证通过')
+
+
+def install_payload(installer, version, *, initial=False, output=None, progress=None):
+    """One installer boundary for first install, stable, dev and CI delivery."""
+    from archive import installer_manifest
+    if installer_manifest(installer).get('version') != version:
+        raise ValueError('installer version differs from approved version')
+    notify = progress or report
+    notify(version, 'verifying', '正在检查安装包完整性')
+    options = {} if output is None else {'stdout': output, 'stderr': subprocess.STDOUT}
+    subprocess.run(['/usr/bin/bash', str(installer), '--check'], check=True, timeout=120, **options)
+    notify(version, 'installing', '正在安装平台并验证状态')
+    flags = [] if initial else ['--upgrade', '--skip-apt']
+    subprocess.run(['/usr/bin/bash', str(installer), *flags], check=True, **options)
+
+
+def initial_stable(version, arch):
+    repo, token = settings()
+    path = 'repos/' + repo + '/releases/' + ('tags/v'+version if version else 'latest')
+    if version is not None and not re.fullmatch(VERSION, version): raise ValueError('stable X.Y.Z required')
+    with open_github(path, token) as response: data = response.read(1024**2+1)
+    if len(data) > 1024**2: raise ValueError('oversized Release metadata')
+    release = json.loads(data)
+    version = release['tag_name'].removeprefix('v')
+    if release['draft'] or release['prerelease'] or not re.fullmatch(VERSION, version): raise ValueError('stable Release required')
+    name = 'deploy-platform-'+version+'-linux-'+arch+'.run'
+    matches = [a for a in release['assets'] if a['name'] == name]
+    if len(matches) != 1: raise ValueError('missing architecture installer')
+    asset = matches[0]
+    result = {'channel': 'stable', 'version': version, 'repository': repo, 'asset_id': asset['id'], 'size': asset['size'], 'digest': asset['digest']}
+    discover(repo, token, result, arch)
+    return result
 
 
 def report(version, phase, message):
@@ -185,12 +216,18 @@ def main():
             return
         os.rename(pending, active)
         version = ''
+        request = {}
         try:
             request = json.loads(private_read(active, 4096))
             version = request.get('version', '')
             ACTIVE_DETAILS = {k: request[k] for k in ('channel', 'run_id', 'commit') if k in request}
             report(version, 'checking', '正在确认已批准的版本')
-            if request.get('channel') == 'dev':
+            if request.get('operation') == 'install' and CURRENT.exists():
+                raise ValueError('platform already installed')
+            if request.get('channel') == 'offline' and request.get('operation') == 'install':
+                from first_install import execute_offline
+                execute_offline(request)
+            elif request.get('channel') == 'dev':
                 from dev_update import execute as execute_dev
                 execute_dev(request)
             elif request.get('channel', 'stable') == 'stable':
@@ -200,8 +237,9 @@ def main():
         except Exception:
             # Neither HTTP signed URLs, token values, nor private installer output
             # are returned through the public API. Detailed installer logs: journal.
-            report(version, 'failed', '升级未完成；请查看升级服务日志确认回退结果后重试')
-            raise RuntimeError('upgrade failed; inspect deploy-update journal and installation transaction') from None
+            command = 'install' if request.get('operation') == 'install' else 'update'
+            report(version, 'failed', '操作未完成；请用 cloudctl system-logs '+command+' 查看日志并确认恢复状态')
+            raise RuntimeError('installation/update failed; inspect cloudctl system-logs '+command+' and installation transaction') from None
         finally:
             active.unlink(missing_ok=True)
 

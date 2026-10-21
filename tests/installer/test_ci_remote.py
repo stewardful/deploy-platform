@@ -10,9 +10,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT/'scripts'))
-spec = importlib.util.spec_from_file_location('ci_remote',ROOT/'scripts/remote-install.py')
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT/'distribution/installer/lib'))
+spec = importlib.util.spec_from_file_location('ci_remote',ROOT/'distribution/installer/lib/ci_worker.py')
 remote = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(remote)
 SHA = 'a'*40
@@ -20,34 +20,44 @@ SHA = 'a'*40
 
 class RemoteWrapperTests(unittest.TestCase):
     def setUp(self):
+        manifest = patch('archive.installer_manifest', return_value={'version': '0.5.3'}); manifest.start(); self.addCleanup(manifest.stop)
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.stage=Path(self.temp.name)
         (self.stage/'installer.run').write_bytes(b'installer bytes')
         digest=hashlib.sha256(b'installer bytes').hexdigest()
         (self.stage/'SHA256SUMS').write_text(digest+'  installer.run\n')
+        from test_ci_server import request
+        value = request(); value.update(installer_sha256=digest, installer_size=len(b'installer bytes'))
+        (self.stage/'request.json').write_text(json.dumps(value))
 
     def test_success_uses_existing_installer_and_records_commit(self):
-        with patch.object(remote.subprocess,'run') as run:
+        with patch.object(remote.subprocess,'run', return_value=subprocess.CompletedProcess([], 0)) as run:
             remote.install(self.stage,SHA)
-        self.assertIn('--check',run.call_args_list[0].args[0])
-        self.assertIn('--upgrade',run.call_args_list[1].args[0])
+        self.assertIn('--check',run.call_args_list[-2].args[0])
+        self.assertIn('--upgrade',run.call_args_list[-1].args[0])
         result=json.loads((self.stage/'result.json').read_text())
         self.assertEqual((result['phase'],result['commit']),('succeeded',SHA))
         self.assertFalse((self.stage/'installer.run').exists())
         self.assertEqual((self.stage/'result.json').stat().st_mode&0o077,0)
 
     def test_failed_upgrade_records_failure_and_keeps_recovery_package(self):
-        with patch.object(remote.subprocess,'run',side_effect=subprocess.CalledProcessError(1,['installer'])):
+        with patch.object(remote.subprocess,'run',side_effect=[subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 0), subprocess.CalledProcessError(1, ['installer'])]):
             with self.assertRaises(subprocess.CalledProcessError):remote.install(self.stage,SHA)
         self.assertEqual(json.loads((self.stage/'result.json').read_text())['phase'],'failed')
         self.assertTrue((self.stage/'installer.run').exists())
 
-    def test_corrupt_upload_never_executes_and_cannot_escape_checksum_path(self):
+    def test_corrupt_installer_never_executes_and_cannot_escape_checksum_path(self):
         for text in ['0'*64+'  installer.run\n','0'*64+'  ../../other\n']:
             (self.stage/'SHA256SUMS').write_text(text)
             with patch.object(remote.subprocess,'run') as run:
-                with self.assertRaises(ValueError):remote.install(self.stage,SHA)
+                with self.assertRaises(ValueError): remote.verify(self.stage)
                 run.assert_not_called()
+
+    def test_uploaded_installer_without_request_is_never_accepted(self):
+        (self.stage/'request.json').unlink()
+        with patch.object(remote.subprocess, 'run') as run:
+            with self.assertRaises(FileNotFoundError): remote.install(self.stage, SHA)
+            run.assert_not_called()
 
     def test_linked_installer_is_rejected(self):
         (self.stage/'installer.run').unlink()
@@ -58,7 +68,7 @@ class RemoteWrapperTests(unittest.TestCase):
 class SSHTransportTests(unittest.TestCase):
     def test_invalid_host_is_rejected_before_any_ssh_or_key_execution(self):
         env=dict(os.environ,GITHUB_REPOSITORY='owner/repo',TEST_SSH_PRIVATE_KEY='test-only',TEST_SSH_KNOWN_HOSTS='test-only',TEST_SERVER_HOST='example.com;touch /tmp/unsafe',TEST_SERVER_USER='ubuntu',GITHUB_RUN_ID='123',GITHUB_RUN_ATTEMPT='1',GITHUB_SHA=SHA,RELEASE_VERSION='0.5.2')
-        result=subprocess.run(['bash',str(ROOT/'scripts/deploy-test.sh')],env=env,capture_output=True,text=True)
+        result=subprocess.run(['bash',str(ROOT/'distribution/ci/deploy-test.sh')],env=env,capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0)
         self.assertIn('invalid TEST_SERVER_HOST',result.stderr)
         self.assertNotIn('test-only',result.stdout+result.stderr)
@@ -96,7 +106,7 @@ else:os.execv('''+repr(real_python)+''', ['''+repr(real_python)+''', *sys.argv[1
 '''
             (bindir/'python3').write_text(wrapper);(bindir/'python3').chmod(0o755)
             env=dict(os.environ,PATH=str(bindir)+os.pathsep+os.environ['PATH'],CI_TEST_TRACE=str(trace),CI_TEST_START=str(start),GITHUB_REPOSITORY='owner/repo',CI_ARTIFACT_DIR=str(root),TEST_SSH_PRIVATE_KEY='test-only',TEST_SSH_KNOWN_HOSTS='test-only',GH_TOKEN='test-only-gh',TEST_SERVER_HOST='127.0.0.1',TEST_SERVER_USER='ubuntu',TEST_SERVER_ARCH='amd64',GITHUB_RUN_ID='123',GITHUB_RUN_ATTEMPT='1',GITHUB_SHA=SHA,RELEASE_VERSION='0.5.3')
-            result=subprocess.run(['bash',str(ROOT/'scripts/deploy-test.sh')],env=env,capture_output=True,text=True)
+            result=subprocess.run(['bash',str(ROOT/'distribution/ci/deploy-test.sh')],env=env,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(json.loads(start.read_text())['request']['commit'],'a')
             commands=[json.loads(line) for line in trace.read_text().splitlines()]
@@ -108,16 +118,16 @@ else:os.execv('''+repr(real_python)+''', ['''+repr(real_python)+''', *sys.argv[1
             self.assertNotIn('URL_SECRET_SENTINEL',trace.read_text()+result.stdout+result.stderr)
             self.assertNotIn('test-only',trace.read_text()+result.stdout+result.stderr)
             preflight=Path(str(trace)+'.preflight').read_text()
-            self.assertIn('/usr/local/bin/deploy-delivery preflight amd64',preflight)
+            self.assertIn('/usr/local/bin/cloudctl delivery preflight amd64',preflight)
             self.assertNotIn('python3 -c', trace.read_text())
             self.assertNotIn('bash -s', trace.read_text())
             for command in commands:
-                if command[0] == 'ssh': self.assertIn('/usr/local/bin/deploy-delivery', command)
+                if command[0] == 'ssh': self.assertIn('/usr/local/bin/cloudctl', command); self.assertIn('delivery', command)
             self.assertEqual(set(json.loads(start.read_text())), {'protocol', 'request', 'ticket'})
             trace.unlink();start.unlink()
-            rejected=subprocess.run(['bash',str(ROOT/'scripts/deploy-test.sh')],env=dict(env,CI_TEST_REJECT_HOST='1'),capture_output=True,text=True)
+            rejected=subprocess.run(['bash',str(ROOT/'distribution/ci/deploy-test.sh')],env=dict(env,CI_TEST_REJECT_HOST='1'),capture_output=True,text=True)
             self.assertEqual(rejected.returncode,1,rejected.stderr)
-            self.assertIn('Install/configure deploy-delivery', rejected.stderr)
+            self.assertIn('Install the platform with cloudctl install', rejected.stderr)
             self.assertFalse(start.exists())
 
 
@@ -126,11 +136,13 @@ class SourceSnapshotTests(unittest.TestCase):
         import shutil
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            shutil.copytree(ROOT/'scripts', root/'scripts')
+            shutil.copytree(ROOT/'distribution/installer/lib', root/'distribution/installer/lib')
+            (root/'distribution/ci').mkdir()
+            shutil.copyfile(ROOT/'distribution/ci/artifact-request.py', root/'distribution/ci/artifact-request.py')
             env = dict(os.environ); env.pop('PYTHONDONTWRITEBYTECODE', None)
-            result = subprocess.run([sys.executable, str(root/'scripts/artifact-request.py'), '--help'], env=env, capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(root/'distribution/ci/artifact-request.py'), '--help'], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             # No arguments: exits before opening any privileged host file.
-            result = subprocess.run([sys.executable, str(root/'scripts/remote-install.py')], env=env, capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(root/'distribution/installer/lib/ci_worker.py')], env=env, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(list(root.rglob('*.pyc')))
