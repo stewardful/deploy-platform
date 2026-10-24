@@ -54,6 +54,12 @@ class FirstInstallTests(unittest.TestCase):
         self.assertIn(str(ROOT/'distribution/installer/lib/update_worker.py'), command)
         self.assertEqual((worker.SPOOL/'request.json').stat().st_mode & 0o077, 0)
 
+    def test_public_dev_install_rejects_unnecessary_private_token_before_host_mutation(self):
+        with self.assertRaisesRegex(first.InstallError, 'only used for stable'):
+            first.main(['--channel','dev','--token-file',str(self.root/'missing-token')])
+        self.preflight.assert_not_called(); self.launch.assert_not_called()
+        self.assertFalse(worker.CONFIG.exists())
+
     def test_stable_first_install_pins_and_revalidates_latest_release_asset(self):
         release = {'tag_name': 'v0.5.3', 'draft': False, 'prerelease': False,
                    'assets': [{'name': 'deploy-platform-0.5.3-linux-amd64.run', 'id': 12, 'size': 100, 'digest': 'sha256:'+'a'*64}]}

@@ -99,4 +99,3 @@ class DevReleaseTests(unittest.TestCase):
         with patch.object(release,'tag_commit',return_value='b'*40),patch.object(release,'gh') as gh:
             with self.assertRaises(ValueError): self.invoke()
             gh.assert_not_called()
-

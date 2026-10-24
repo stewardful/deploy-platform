@@ -19,6 +19,8 @@ import platform_updates as cli
 import update_worker as worker
 from dev_manifest import validate
 
+READ_SETTINGS = worker.settings
+
 
 def manifest(run='42'):
     data = b'verified installer'
@@ -48,6 +50,15 @@ class PlatformUpdateTests(unittest.TestCase):
         self.assertEqual([c.args[1] for c in self.metadata.call_args_list], ['dev-latest', 'dev-42'])
         self.settings.assert_called_once_with(read_token=False)
         self.assertNotIn('token', json.dumps(result))
+
+    def test_saved_private_stable_token_is_not_needed_for_public_dev(self):
+        config = self.root/'updates.json'
+        config.write_text(json.dumps({'repository':'owner/repo','token_file':str(self.root/'missing-private-token')}))
+        config.chmod(0o600)
+        with patch.object(worker,'CONFIG',config):
+            self.settings.side_effect = READ_SETTINGS
+            self.assertEqual(dev.discover()['run_id'], '42')
+        self.settings.assert_called_once_with(read_token=False)
 
     def test_fixed_run_does_not_consult_latest_and_invalid_runs_fail_closed(self):
         self.assertEqual(dev.discover('42')['run_id'], '42')
