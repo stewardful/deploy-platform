@@ -1,3 +1,0 @@
-ARG UBUNTU_VERSION=24.04
-FROM cloud-upgrade-test:${UBUNTU_VERSION}
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server sudo && rm -rf /var/lib/apt/lists/*

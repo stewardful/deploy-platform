@@ -44,6 +44,6 @@
 - [版本发现与网页升级](updates.md)：GitHub Release、私有仓库凭据、升级状态和恢复。
 - [0.5.2 网页升级验收](update-validation.md)：测试结果、隔离系统级流程及未验证边界。
 
-- [dev/main CI/CD](ci-cd.md)：测试机 SSH 配置、自动部署、正式发版和排错。
+- [dev/main CI/CD](ci-cd.md)：公开发布、本机通知、本地升级策略与排错。
 
 - [Ubuntu 24.04 / 26.04 兼容性](ubuntu-compatibility.md)：0.5.3 的主机预检、安装、升级与验证边界。

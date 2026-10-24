@@ -6,8 +6,8 @@ on:
         description: amd64, arm64 or both
         type: string
         default: both
-      delivery:
-        description: Upload only the installer and checksums for server HTTPS delivery
+      platform-update:
+        description: Build platform updates without bundling reusable runtime dependencies
         type: boolean
         default: false
     outputs:
@@ -85,7 +85,7 @@ jobs:
       - name: Build requested platform package
         env:
           VERSION: ${{ needs.validate.outputs.version }}
-          PACKAGE_KIND: ${{ inputs.delivery && 'platform-update' || 'offline' }}
+          PACKAGE_KIND: ${{ inputs.platform-update && 'platform-update' || 'offline' }}
         run: make release-build
       - name: Verify installer and checksums
         run: |
@@ -93,7 +93,7 @@ jobs:
           cd target/dist
           sha256sum -c ./*.sha256
       - name: Build and check the formal offline package on PRs
-        if: github.event_name == 'pull_request' && inputs.delivery
+        if: github.event_name == 'pull_request' && inputs.platform-update
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           PACKAGE_KIND: offline
@@ -104,7 +104,7 @@ jobs:
           cd target/offline
           sha256sum -c ./*.sha256
       - uses: actions/upload-artifact@v6
-        if: github.event_name == 'pull_request' && inputs.delivery
+        if: github.event_name == 'pull_request' && inputs.platform-update
         with:
           name: deploy-platform-offline-linux-${{ matrix.arch }}
           path: |
@@ -114,14 +114,14 @@ jobs:
           retention-days: 3
           if-no-files-found: error
       - uses: actions/upload-artifact@v6
-        if: ${{ !inputs.delivery }}
+        if: ${{ !inputs.platform-update }}
         with:
           name: deploy-platform-linux-${{ matrix.arch }}
           path: target/dist/*
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v6
-        if: inputs.delivery
+        if: inputs.platform-update
         with:
           name: deploy-platform-linux-${{ matrix.arch }}
           path: |

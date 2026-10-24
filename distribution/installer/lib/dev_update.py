@@ -49,7 +49,7 @@ def discover(run_id=None, *, initial=False):
             'size': item['size'], 'digest': 'sha256:'+item['sha256']}
 
 
-def execute(request):
+def execute(request, *, before_install=None):
     initial = request.get('operation') == 'install'
     fresh = discover(request['run_id'], initial=initial)
     if fresh != {k: v for k, v in request.items() if k not in ('phase', 'operation')}:
@@ -64,6 +64,7 @@ def execute(request):
         if (candidate.get('package_kind') != 'platform-update' or candidate.get('version') != request['version'] or candidate.get('arch') != request['arch'] or
                 candidate.get('build') != {'channel': 'dev', 'commit': request['commit']}):
             raise ValueError('installer build provenance mismatch')
+        if before_install is not None: before_install()
         worker.install_payload(installer, request['version'], initial=initial)
     installed = json.loads(worker.CURRENT.read_text())
     if (installed['version'] != request['version'] or installed['arch'] != request['arch'] or

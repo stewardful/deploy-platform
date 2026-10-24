@@ -144,7 +144,7 @@ VERSION=0.5.3 make release-build
 
 生成 `target/dist/*.run`、`.tar.gz`、`.sha256`。`package.py` 也可以接收已构建的 `--bin-dir`、`--web-dir` 和 `--runtime-archive`，会检查 ELF 架构和每个文件的摘要。`Dockerfile.agent` 可从其他系统构建 Linux Agent，Go 可交叉编译，Web 产物与架构无关。
 
-推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送发布公开预发布包，只有开启独立开关后才通过 SSH 更新测试机，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
+推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送发布公开预发布包，服务器通过本机 SSE 通知和本地策略拉取更新，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
 
 Ubuntu 26.04 的适配与本地安装、升级验收入口见 [Ubuntu 兼容性验证](ubuntu-compatibility.md)。
 
@@ -153,7 +153,7 @@ Ubuntu 26.04 的适配与本地安装、升级验收入口见 [Ubuntu 兼容性�
 
 公开仓库的 dev 构建发布到 GitHub 预发布 Release，服务器无需 GitHub token、GitHub CLI、Git、Rust、Go、Node 或额外交付工具。需要 Python 3、curl、systemd、cgroup v2，以及访问 GitHub/Release CDN 和 Ubuntu 软件源的网络。
 
-首次在服务器准备命令（须等本改动合并、工作流恢复启用并成功发布第一份预发布包后执行）：
+首次在服务器准备命令（须等本改动合并、新的发布工作流成功发布第一份预发布包后执行）：
 
 ```bash
 mkdir -p ~/deploy-platform-bootstrap
@@ -200,4 +200,4 @@ sudo cloudctl upgrade-dev --yes
 - 正式 `vX.Y.Z` Release：cloudctl、两种架构完整离线包及摘要。dev 只打平台更新包，基础运行时按锁定版本下载或复用。
 - 安装后的服务器：`/opt/deploy-platform/releases/` 存放不可变版本，`current` 指向当前版本；配置在 `/etc/deploy-platform/`，业务数据在 `/var/lib/deploy-platform/`。
 
-CI 自动部署使用同一入口 `cloudctl delivery preflight|start|refresh|status|logs`，仅在显式打开部署开关后运行；任务数据保存在 `/var/lib/deploy-platform/delivery/jobs`，临时 Actions 授权留在 runner/私有票据中，不向服务器保存 GitHub token。
+自动通知升级仅通过现有 Go 控制端订阅本机 SSE，dev 开关默认关闭，正式版只提示。使用 `sudo cloudctl update policy --dev-auto-upgrade on` 开启 dev 自动升级；详见 [CI/CD](ci-cd.md)。没有 SSH 自动部署或 cloudctl delivery 入口。

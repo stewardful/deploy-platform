@@ -10,9 +10,8 @@ import subprocess
 import time
 
 import update_worker as worker
-from state import write_record
+from state import write_record, trusted
 from platform_updates import queue
-from ci_state import trusted
 
 CLI_ROOT = Path(__file__).resolve().parent.parent
 

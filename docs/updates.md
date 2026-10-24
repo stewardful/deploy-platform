@@ -12,7 +12,7 @@
 
 ## 服务器配置
 
-默认检查 `stewardful/deploy-platform` 的最新正式 GitHub Release，每小时一次，控制端启动约十秒后首次检查。手动检查至少间隔一分钟，包括失败请求，防止耗尽 GitHub 配额。页面每三十秒查询本地状态，有升级任务时每五秒查询；隐藏标签页暂停查询。
+默认检查 `stewardful/deploy-platform` 的最新正式 GitHub Release，在控制端启动约十秒后及通知服务重连时补查，发布通知触发检查。手动检查至少间隔一分钟，包括失败请求，防止耗尽 GitHub 配额。页面每三十秒查询本地状态，有升级任务时每五秒查询；隐藏标签页暂停查询。
 
 公共仓库无需凭据。私有仓库需要管理员创建仅允许该仓库 **Contents: read** 的 GitHub fine-grained token，写入服务器 `/etc/deploy-platform/github.token`，权限为 `0600`，不要放在源码、Shell 历史或网页中。再创建：
 
@@ -78,6 +78,6 @@ sudo cat /var/lib/deploy-platform/updates/result.json
 
 下载仅允许构造的 GitHub Release HTTPS 地址和许可的 GitHub CDN 重定向，流式写盘并核对已批准大小和 SHA256，再检查内嵌 dev 来源和提交。摘要来自同一可信发布渠道，不是独立发布者签名。dev Release 不自动过期，暂无自动清理；若维护者删除构建，运行编号不能恢复已删除资产。
 
-dev 不增加 API、常驻服务或版本轮询；CLI 原子提交同一个更新队列，执行器调用原安装器 `--check`、`--upgrade --skip-apt`。Web 和 CLI 的提交由跨进程锁串行化，安装器节点锁覆盖离线包及 CI 更新。更新结果包含 channel/run_id/commit，失败不会自动重试；更新不能降级平台版本，也不能跳过业务探针覆盖。
+dev 不增加 API、常驻服务或版本轮询；CLI 原子提交同一个更新队列，执行器调用原安装器 `--check`、`--upgrade --skip-apt`。Web、CLI 和通知提交由跨进程锁串行化，安装器节点锁覆盖所有升级。更新结果包含 channel/run_id/commit，失败不会自动重试；更新不能降级平台版本，也不能跳过业务探针覆盖。
 
-首次使用 `cloudctl install --channel dev`，后续 `cloudctl upgrade-dev --yes`；均复用下载组件、受保护安装器和任务状态。CI 使用平台自带的 cloudctl delivery，不依赖外部工具仓库。详见 [统一首次安装](install.md#统一-cloudctl-首次安装) 和 [CI/CD](ci-cd.md)。
+首次使用 `cloudctl install --channel dev`，后续 `cloudctl upgrade-dev --yes`；均复用下载组件、受保护安装器和任务状态。通知服务通过本机 SSE 提供提示，平台自行核验并更新；通知服务无平台权限。详见 [统一首次安装](install.md#统一-cloudctl-首次安装) 和 [CI/CD](ci-cd.md)。

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared by the installer bootstrap, host checks and CI SSH preflight.
+# Shared by the installer bootstrap and local host checks.
 supported_os() {
     [[ $1 == ubuntu && ( $2 == 24.04 || $2 == 26.04 ) ]]
 }

@@ -14,7 +14,7 @@ def build_metadata(root, arch):
     if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version):
         raise ValueError('CI requires a stable workspace version')
     if arch not in ('amd64', 'arm64', 'both'):
-        raise ValueError('TEST_SERVER_ARCH must be amd64 or arm64')
+        raise ValueError('build architecture must be amd64, arm64 or both')
     targets = [{'runner': 'ubuntu-24.04', 'arch': 'amd64'},
                {'runner': 'ubuntu-24.04-arm', 'arch': 'arm64'}]
     return version, [t for t in targets if arch in ('both', t['arch'])]

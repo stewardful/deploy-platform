@@ -9,12 +9,12 @@ jobs:
       - uses: actions/checkout@v5
       - run: make installer-test shellcheck workflow-check
   build:
-    # Exercise the same installer pipeline as dev before merging, without SSH secrets.
+    # Exercise the same installer pipeline as dev before merging, without publishing or server access.
     if: github.event_name == 'pull_request'
     uses: ./.github/workflows/build-installers.yml
     with:
       arch: amd64
-      delivery: true
+      platform-update: true
   ubuntu-install:
     timeout-minutes: 25
     permissions:
@@ -37,14 +37,6 @@ jobs:
         with:
           name: deploy-platform-offline-linux-amd64
           path: offline
-      - name: Verify actual GitHub archive digest, size and extraction contract
-        if: matrix.ubuntu == '26.04'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CI_ARTIFACT_DIR: ${{ github.workspace }}/dist
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
-          CI_ARTIFACT_COMMIT: ${{ github.event.pull_request.head.sha }}
-        run: python3 distribution/tests/check-artifact.py
       - name: Install and exercise real containers on an isolated 2CPU/2GiB node
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}
@@ -53,11 +45,11 @@ jobs:
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}
         run: bash distribution/tests/ubuntu-smoke.sh "$GITHUB_WORKSPACE"/offline/deploy-platform-*-linux-amd64.run
-      - name: Exercise real SSH control and HTTPS delivery faults
+      - name: Verify local SSE and protected dev automatic upgrades
         if: matrix.ubuntu == '26.04'
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}
-        run: bash distribution/tests/ci-ssh-smoke.sh "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run
+        run: bash distribution/tests/notification-smoke.sh "$GITHUB_WORKSPACE"/offline/deploy-platform-*-linux-amd64.run "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run
       - uses: actions/setup-go@v6
         if: matrix.ubuntu == '26.04'
         with:

@@ -4,8 +4,8 @@
 
 ## 实现边界
 
-- `distribution/installer/lib/os.sh` 是系统版本策略，安装器、缺少 Python 时的引导以及 SSH 上传前预检共用。打包时将相同策略嵌入自解压外壳。
-- SSH 传包前检查系统、架构、systemd/cgroup、sudo 和可用磁盘。拒绝的节点不接收安装包。
+- `distribution/installer/lib/os.sh` 是系统版本策略，安装器、缺少 Python 时的引导以及本机主机检查共用。打包时将相同策略嵌入自解压外壳。
+- 本地安装前检查系统、架构、systemd/cgroup、sudo 和可用磁盘；不符合要求时拒绝安装。
 - 发布父目录与 releases 目录显式设置为 0755，避免 `umask 077` 影响动态代理用户遍历目录。密钥、管理配置和数据库仍在原私有目录，不放宽其权限。
 - 这是目标系统的应用兼容性，不包含在服务器上执行 Ubuntu 发行版升级。
 
@@ -23,8 +23,8 @@ UBUNTU_VERSION=26.04 bash distribution/tests/upgrade-smoke.sh /ABS/deploy-platfo
 # 24.04 上真实历史版本到新版的升级
 UBUNTU_VERSION=24.04 bash distribution/tests/upgrade-smoke.sh /ABS/deploy-platform-0.5.2-linux-arm64.run /ABS/deploy-platform-0.5.3-linux-arm64.run /ABS/upgrade-demo.tar
 
-# SSH 预检、HTTPS 地址刷新/续传、首次安装和断线升级；安装包旁需有 .sha256
-UBUNTU_VERSION=26.04 bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-0.5.3-linux-arm64.run
+# 本机 SSE、默认关闭、dev 自动升级、错误来源拒绝与重启去重
+UBUNTU_VERSION=26.04 bash distribution/tests/notification-smoke.sh /ABS/offline/deploy-platform-0.5.3-linux-arm64.run /ABS/dev/deploy-platform-0.5.3-linux-arm64.run
 ```
 
 `upgrade-demo.tar` 必须包含与节点架构一致、标记为 `cloud-fullstack-demo:upgrade-check` 的验收镜像。HTTPS 使用隔离测试 CA，覆盖前端、后端、PostgreSQL、Redis、业务数据保留、缺少探针时提前拒绝、注入后端故障后回退及正常重装。测试不会连接腾讯云服务器。

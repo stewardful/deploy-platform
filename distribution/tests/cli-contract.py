@@ -29,7 +29,7 @@ def main():
     call('status')
     assert 'execution' in json.loads(call('update', 'status'))
     call('upgrade', '--help'); call('upgrade-dev', '--help'); call('test', 'fullstack', '--help')
-    for args in (['logs'], ['logs', 'agent'], ['plan'], ['apply'], ['version', 'ignored']):
+    for args in (['logs'], ['logs', 'agent'], ['plan'], ['apply'], ['version', 'ignored'], ['delivery', 'status']):
         call(*args, code=2)
     print('PASS: installed cloudctl version, preview, Agent queries, health, update status, help and removed commands')
 

@@ -44,12 +44,11 @@ Node and updates:
   agent-health                 Check Agent API and task acceptance only
   version                      Platform release, build and component versions
   system-logs SERVICE          agent | control | runtime | proxy | update
-  update check | status        Stable Release discovery / shared update task status
+  update check | status | policy   Release discovery / task status / local dev policy
   upgrade --version X.Y.Z --yes   Queue the checked stable Release
   upgrade-dev [--run-id ID] [--yes] Latest successful dev build, or a specific run
 
 Advanced:
-  delivery preflight|start|refresh|status|logs    CI control through this CLI
   token                        Print private Web login token (sudo)
   maintenance status | enter | exit    Upgrade admission gate, not an upgrade
   test smoke | stateful | fullstack    Real tests; create resources and may restart Agent
@@ -108,9 +107,6 @@ def main(argv=None):
             print('cloudctl install: '+str(error), file=sys.stderr)
             raise SystemExit(2) from None
         return
-    if name == 'delivery':
-        from ci_control import main as control
-        control(rest); return
     if name in AGENT:
         if name == 'preview' and rest in (['--help'], ['-h']):
             p = parser(name, 'Validate and summarize an AppSpec offline. No live-state comparison, runtime checks or deployment dry-run. Secrets are referenced, not resolved.')

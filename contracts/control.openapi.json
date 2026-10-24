@@ -772,7 +772,8 @@
           "candidate",
           "checked_at",
           "error",
-          "execution"
+          "execution",
+          "notifications"
         ],
         "properties": {
           "enabled": {
@@ -843,7 +844,8 @@
                       "installing",
                       "succeeded",
                       "failed",
-                      "interrupted"
+                      "interrupted",
+                      "skipped"
                     ]
                   },
                   "message": {
@@ -852,6 +854,69 @@
                 }
               }
             ]
+          },
+          "notifications": {
+            "type": "object",
+            "required": [
+              "connected",
+              "dev_auto_upgrade",
+              "dev_tag",
+              "error",
+              "last_attempt"
+            ],
+            "properties": {
+              "connected": {
+                "type": "boolean"
+              },
+              "dev_auto_upgrade": {
+                "type": "boolean",
+                "description": "Server-local policy; absent local configuration is off."
+              },
+              "dev_tag": {
+                "type": "string",
+                "description": "Untrusted release hint; not proof of installation."
+              },
+              "error": {
+                "type": "string"
+              },
+              "last_attempt": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "schema_version",
+                      "repository",
+                      "run_id",
+                      "phase"
+                    ],
+                    "properties": {
+                      "schema_version": {
+                        "type": "integer",
+                        "const": 1
+                      },
+                      "repository": {
+                        "type": "string"
+                      },
+                      "run_id": {
+                        "type": "string"
+                      },
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "attempted",
+                          "failed",
+                          "succeeded",
+                          "skipped"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
           }
         }
       }

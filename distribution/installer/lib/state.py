@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from pathlib import Path
 import shutil
 import tempfile
@@ -227,3 +228,12 @@ if __name__ == "__main__":
     elif a.action == "recover": recover(a.source)
     elif a.action == "commit": commit()
     else: receipt(a.source, a.cidr, a.phase)
+
+
+def trusted(path, *, directory=False, private=True):
+    """Root-owned local path; secrets stay private, immutable assets stay unwritable."""
+    info = path.lstat()
+    kind = stat.S_ISDIR if directory else stat.S_ISREG
+    if not kind(info.st_mode) or info.st_uid != 0 or info.st_mode & (0o077 if private else 0o022):
+        raise ValueError('untrusted local path')
+    return path

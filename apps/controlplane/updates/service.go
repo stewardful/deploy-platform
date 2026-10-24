@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"deploy-platform.local/controlplane/notifications"
 )
 
 var stable = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -41,16 +43,22 @@ type Execution struct {
 	Message string `json:"message"`
 }
 type Status struct {
-	Enabled   bool       `json:"enabled"`
-	Current   string     `json:"current"`
-	Candidate *Candidate `json:"candidate"`
-	CheckedAt string     `json:"checked_at"`
-	Error     string     `json:"error"`
-	Execution *Execution `json:"execution"`
+	Enabled       bool               `json:"enabled"`
+	Current       string             `json:"current"`
+	Candidate     *Candidate         `json:"candidate"`
+	CheckedAt     string             `json:"checked_at"`
+	Error         string             `json:"error"`
+	Execution     *Execution         `json:"execution"`
+	Notifications NotificationStatus `json:"notifications"`
+}
+type NotificationSettings struct {
+	Endpoint       string `json:"endpoint"`
+	DevAutoUpgrade bool   `json:"dev_auto_upgrade"`
 }
 type Settings struct {
-	Repository string `json:"repository"`
-	TokenFile  string `json:"token_file"`
+	Notifications NotificationSettings `json:"notifications"`
+	Repository    string               `json:"repository"`
+	TokenFile     string               `json:"token_file"`
 }
 type Service struct {
 	mu                                         sync.Mutex
@@ -103,8 +111,9 @@ func privateRead(path string, limit int64) ([]byte, error) {
 	}
 	return b, nil
 }
-func (s *Service) settings() (Settings, string, error) {
-	cfg := Settings{Repository: "stewardful/deploy-platform"}
+func (s *Service) settings() (Settings, string, error) { return s.loadSettings(true) }
+func (s *Service) loadSettings(readToken bool) (Settings, string, error) {
+	cfg := Settings{Repository: "stewardful/deploy-platform", Notifications: NotificationSettings{Endpoint: notifications.DefaultEndpoint}}
 	if _, err := os.Lstat(s.config); !os.IsNotExist(err) {
 		data, err := privateRead(s.config, 4096)
 		if err != nil || json.Unmarshal(data, &cfg) != nil {
@@ -115,7 +124,7 @@ func (s *Service) settings() (Settings, string, error) {
 		return cfg, "", ErrUnavailable
 	}
 	token := ""
-	if cfg.TokenFile != "" {
+	if cfg.TokenFile != "" && readToken {
 		if !filepath.IsAbs(cfg.TokenFile) {
 			return cfg, "", ErrUnavailable
 		}
@@ -149,6 +158,7 @@ func newer(a, b string) bool {
 }
 func (s *Service) snapshot() Status {
 	value := s.status
+	value.Notifications.LastAttempt, _ = s.lastAttempt("")
 	for _, name := range []string{"active.json", "request.json", "result.json"} {
 		data, err := privateRead(filepath.Join(s.dir, name), 4096)
 		if err != nil {
@@ -165,7 +175,7 @@ func (s *Service) snapshot() Status {
 		if name == "active.json" {
 			result, err := privateRead(filepath.Join(s.dir, "result.json"), 4096)
 			var progress Execution
-			if err == nil && json.Unmarshal(result, &progress) == nil && (progress.Version == e.Version || e.Channel == "dev") && progress.Channel == e.Channel && progress.RunID == e.RunID {
+			if err == nil && json.Unmarshal(result, &progress) == nil && (progress.Version == e.Version || e.Channel == "dev" || e.Channel == "dev-notice") && progress.Channel == e.Channel && (progress.RunID == e.RunID || e.Channel == "dev-notice" && e.RunID == "") {
 				e = progress
 			}
 			lock, err := os.OpenFile(filepath.Join(s.dir, "worker.lock"), os.O_RDWR, 0600)
@@ -273,23 +283,9 @@ func (s *Service) discover(ctx context.Context) (*Candidate, error) {
 func (s *Service) Upgrade(version string) (Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := os.OpenFile(filepath.Join(s.dir, "submission.lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return s.snapshot(), err
-	}
-	defer lock.Close()
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return s.snapshot(), ErrConflict
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	c := s.status.Candidate
 	if c == nil || version != c.Version || s.now().Sub(s.last) > time.Hour || s.status.Error != "" {
 		return s.snapshot(), ErrConflict
-	}
-	for _, name := range []string{"request.json", "active.json"} {
-		if _, err := os.Lstat(filepath.Join(s.dir, name)); !os.IsNotExist(err) {
-			return s.snapshot(), ErrConflict
-		}
 	}
 	cfg, _, err := s.settings()
 	if err != nil {
@@ -301,10 +297,34 @@ func (s *Service) Upgrade(version string) (Status, error) {
 		Repository string `json:"repository"`
 		Phase      string `json:"phase"`
 	}{*c, cfg.Repository, "queued"}
+	err = s.publishRequest(request)
+	return s.snapshot(), err
+}
+
+// publishRequest is the one Go submission boundary for manual and notification requests.
+// Python CLI shares its submission.lock and the same independent worker/installer.
+func (s *Service) publishRequest(request any) error {
+	lock, err := os.OpenFile(filepath.Join(s.dir, "submission.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return ErrConflict
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	for _, name := range []string{"request.json", "active.json"} {
+		if _, err := os.Lstat(filepath.Join(s.dir, name)); !os.IsNotExist(err) {
+			return ErrConflict
+		}
+	}
+	if err := os.Remove(filepath.Join(s.dir, "result.json")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	data, _ := json.Marshal(request)
 	f, err := os.CreateTemp(s.dir, ".request-")
 	if err != nil {
-		return s.snapshot(), err
+		return err
 	}
 	defer os.Remove(f.Name())
 	if _, err = f.Write(data); err == nil {
@@ -318,7 +338,7 @@ func (s *Service) Upgrade(version string) (Status, error) {
 		err = os.Rename(f.Name(), filepath.Join(s.dir, "request.json"))
 	}
 	if err != nil {
-		return s.snapshot(), err
+		return err
 	}
 	d, err := os.Open(s.dir)
 	if err == nil {
@@ -326,20 +346,7 @@ func (s *Service) Upgrade(version string) (Status, error) {
 		_ = d.Close()
 	}
 	if err != nil {
-		return s.snapshot(), err
+		return err
 	}
-	return s.snapshot(), nil
-}
-func (s *Service) Run(ctx context.Context) {
-	timer := time.NewTimer(10 * time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			_, _ = s.Check(ctx)
-			timer.Reset(time.Hour)
-		}
-	}
+	return nil
 }

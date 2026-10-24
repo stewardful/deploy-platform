@@ -11,7 +11,7 @@ def validate(value, repository):
         raise ValueError('invalid dev manifest fields')
     if type(value['schema_version']) is not int or value['schema_version'] != SCHEMA or value['repository'] != repository:
         raise ValueError('dev manifest source/schema differs')
-    if not isinstance(value['run_id'], str) or not re.fullmatch(r'[1-9][0-9]{0,19}', value['run_id']):
+    if not isinstance(value['run_id'], str) or not re.fullmatch(r'[1-9][0-9]{0,19}', value['run_id']) or int(value['run_id']) >= 2**64:
         raise ValueError('invalid dev run')
     if not isinstance(value['commit'], str) or not re.fullmatch('[a-f0-9]{40}', value['commit']):
         raise ValueError('invalid dev commit')

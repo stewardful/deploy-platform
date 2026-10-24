@@ -169,7 +169,7 @@ def execute(request):
 
 
 def install_payload(installer, version, *, initial=False, output=None, progress=None):
-    """One installer boundary for first install, stable, dev and CI delivery."""
+    """One installer boundary for first install, stable, dev and notification updates."""
     from archive import installer_manifest
     if installer_manifest(installer).get('version') != version:
         raise ValueError('installer version differs from approved version')
@@ -227,6 +227,9 @@ def main():
             if request.get('channel') == 'offline' and request.get('operation') == 'install':
                 from first_install import execute_offline
                 execute_offline(request)
+            elif request.get('channel') == 'dev-notice':
+                from notification_updates import execute as execute_notice
+                execute_notice(request)
             elif request.get('channel') == 'dev':
                 from dev_update import execute as execute_dev
                 execute_dev(request)
