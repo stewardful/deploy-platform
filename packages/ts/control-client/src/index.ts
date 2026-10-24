@@ -233,7 +233,7 @@ export interface LogSnapshot {
 }
 export interface PlatformUpdate {
   notifications: {
-    connected: boolean;
+    enabled: boolean;
     dev_auto_upgrade: boolean;
     dev_tag: string;
     error: string;

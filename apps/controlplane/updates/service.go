@@ -18,8 +18,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"deploy-platform.local/controlplane/notifications"
 )
 
 var stable = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -52,7 +50,7 @@ type Status struct {
 	Notifications NotificationStatus `json:"notifications"`
 }
 type NotificationSettings struct {
-	Endpoint       string `json:"endpoint"`
+	SecretFile     string `json:"secret_file"`
 	DevAutoUpgrade bool   `json:"dev_auto_upgrade"`
 }
 type Settings struct {
@@ -67,6 +65,7 @@ type Service struct {
 	now                                        func() time.Time
 	last                                       time.Time
 	status                                     Status
+	wake                                       chan struct{}
 }
 
 func New(dir, manifest, config string) (*Service, error) {
@@ -88,7 +87,7 @@ func New(dir, manifest, config string) (*Service, error) {
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("updates directory must be a private directory")
 	}
-	return &Service{dir: dir, current: release.Version, currentChannel: release.Build.Channel, arch: release.Arch, config: config, now: time.Now, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, status: Status{Enabled: true, Current: release.Version}}, nil
+	return &Service{dir: dir, current: release.Version, currentChannel: release.Build.Channel, arch: release.Arch, config: config, now: time.Now, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, wake: make(chan struct{}, 1), status: Status{Enabled: true, Current: release.Version}}, nil
 }
 
 func privateRead(path string, limit int64) ([]byte, error) {
@@ -113,14 +112,16 @@ func privateRead(path string, limit int64) ([]byte, error) {
 }
 func (s *Service) settings() (Settings, string, error) { return s.loadSettings(true) }
 func (s *Service) loadSettings(readToken bool) (Settings, string, error) {
-	cfg := Settings{Repository: "stewardful/deploy-platform", Notifications: NotificationSettings{Endpoint: notifications.DefaultEndpoint}}
+	cfg := Settings{Repository: "stewardful/deploy-platform", Notifications: NotificationSettings{SecretFile: "/etc/deploy-platform/webhook.secret"}}
 	if _, err := os.Lstat(s.config); !os.IsNotExist(err) {
 		data, err := privateRead(s.config, 4096)
-		if err != nil || json.Unmarshal(data, &cfg) != nil {
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.DisallowUnknownFields()
+		if err != nil || decoder.Decode(&cfg) != nil || decoder.Decode(new(any)) != io.EOF {
 			return cfg, "", ErrUnavailable
 		}
 	}
-	if !repository.MatchString(cfg.Repository) || strings.Contains(cfg.Repository, "..") {
+	if !repository.MatchString(cfg.Repository) || strings.Contains(cfg.Repository, "..") || cfg.Notifications.SecretFile != "" && !filepath.IsAbs(cfg.Notifications.SecretFile) {
 		return cfg, "", ErrUnavailable
 	}
 	token := ""
@@ -175,7 +176,7 @@ func (s *Service) snapshot() Status {
 		if name == "active.json" {
 			result, err := privateRead(filepath.Join(s.dir, "result.json"), 4096)
 			var progress Execution
-			if err == nil && json.Unmarshal(result, &progress) == nil && (progress.Version == e.Version || e.Channel == "dev" || e.Channel == "dev-notice") && progress.Channel == e.Channel && (progress.RunID == e.RunID || e.Channel == "dev-notice" && e.RunID == "") {
+			if err == nil && json.Unmarshal(result, &progress) == nil && (progress.Version == e.Version || e.Channel == "dev" || e.Channel == "dev-notice") && progress.Channel == e.Channel && progress.RunID == e.RunID {
 				e = progress
 			}
 			lock, err := os.OpenFile(filepath.Join(s.dir, "worker.lock"), os.O_RDWR, 0600)
@@ -201,7 +202,7 @@ func (s *Service) Status() Status { s.mu.Lock(); defer s.mu.Unlock(); return s.s
 func (s *Service) Check(ctx context.Context) (Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Bound authenticated manual refreshes and background polling, including failures.
+	// Bound authenticated manual refreshes and notification-triggered checks, including failures.
 	if !s.last.IsZero() && s.now().Sub(s.last) < time.Minute {
 		return s.snapshot(), nil
 	}

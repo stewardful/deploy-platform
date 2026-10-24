@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Isolated SSE and trusted HTTPS Release fixture; never an override in production code."""
+"""Isolated signed Webhook and trusted HTTPS Release fixture; never an override in production code."""
 import hashlib
+import hmac
+import urllib.error
 import http.server
 import json
 from pathlib import Path
@@ -55,23 +57,13 @@ class Releases(http.server.BaseHTTPRequestHandler):
         self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
 
 
-class Events(http.server.BaseHTTPRequestHandler):
-    def log_message(self,*args): pass
-    def do_GET(self):
-        if self.path!='/v1/events':self.send_error(404);return
-        self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
-        previous=''
-        try:
-            while True:
-                run=current_run()
-                if run!=previous:
-                    notice={'repository':REPO,'channel':'dev','tag':'dev-'+run,'release_id':int(run),'published_at':'2026-10-25T00:00:00Z'}
-                    stable=dict(notice,channel='stable',tag='v'+stable_version())
-                    value={'revision':int(run),'latest':{'dev':notice,'stable':stable}}
-                    self.wfile.write(('event: snapshot\ndata: '+json.dumps(value)+'\n\n').encode());previous=run
-                else:self.wfile.write(b': heartbeat\n\n')
-                self.wfile.flush();time.sleep(1)
-        except (OSError,ConnectionError):pass
+def send_notice(run='42',stable=False,bad_signature=False):
+    tag='v'+stable_version() if stable else 'dev-'+run
+    body=json.dumps({'action':'published','repository':{'full_name':REPO,'id':1},'release':{'id':int(run),'tag_name':tag,'draft':False,'prerelease':not stable,'published_at':'2026-10-25T00:00:00Z'}}).encode()
+    signature=hmac.new(Path('/etc/deploy-platform/webhook.secret').read_bytes().strip(),body,hashlib.sha256).hexdigest()
+    if bad_signature:signature='0'*64
+    req=urllib.request.Request('http://127.0.0.1:8088/hooks/github/releases',data=body,headers={'Content-Type':'application/json','X-GitHub-Event':'release','X-GitHub-Delivery':'00000000-0000-0000-0000-000000000001','X-Hub-Signature-256':'sha256='+signature})
+    with urllib.request.urlopen(req,timeout=5) as response:assert response.status==200
 
 
 def wait(predicate,label,seconds=90):
@@ -95,18 +87,24 @@ def setup():
     subprocess.run(['update-ca-certificates'],check=True,stdout=subprocess.DEVNULL)
     with Path('/etc/hosts').open('a') as out:out.write('\n127.0.0.2 github.com api.github.com\n')
     subprocess.run(['iptables','-t','nat','-A','OUTPUT','-d','127.0.0.2','-p','tcp','--dport','443','-j','REDIRECT','--to-ports','14443'],check=True)
-    for kind in ('releases','events'):
+    for kind in ('releases',):
         subprocess.run(['systemd-run','--unit','notification-test-'+kind,'/usr/bin/python3','-B',str(ROOT/'notification-runtime.py'),kind],check=True)
+    Path('/etc/deploy-platform/webhook.secret').write_text('a'*32)
+    Path('/etc/deploy-platform/webhook.secret').chmod(0o600)
     (Path('/etc/deploy-platform/updates.json')).write_text(json.dumps({'repository':REPO}))
     Path('/etc/deploy-platform/updates.json').chmod(0o600)
     subprocess.run(['systemctl','restart','deploy-control'],check=True)
     sys.path.insert(0,'/opt/deploy-platform/current')
     from smoke import request
     def status():return request('/api/v1/updates')
-    wait(lambda:status()['notifications']['connected'] and (status().get('candidate') or {}).get('version')==stable_version(),'SSE and stable prompt')
+    wait(lambda:status()['notifications']['enabled'],'webhook configured')
+    try:send_notice(bad_signature=True);raise AssertionError('forged signature accepted')
+    except urllib.error.HTTPError as error:assert error.code==401
+    send_notice(stable=True);send_notice()
+    wait(lambda:(status().get('candidate') or {}).get('version')==stable_version(),'stable prompt')
     spool=Path('/var/lib/deploy-platform/updates')
     assert not (spool/'request.json').exists() and not (spool/'active.json').exists()
-    print('PASS: real Go SSE, dev default off, stable candidate prompts without installing',flush=True)
+    print('PASS: signed Webhook, dev default off, stable candidate prompts without installing',flush=True)
     subprocess.run(['cloudctl','update','policy','--dev-auto-upgrade','on'],check=True)
     def attempt():return json.loads((spool/'notification-dev.json').read_text())
     wait(lambda:attempt()['phase']=='succeeded','automatic dev installation',240)
@@ -115,25 +113,28 @@ def setup():
     assert installed['build']==manifest['build']
     backups=lambda:len(list(Path('/var/lib/deploy-platform/backups').iterdir()))
     saved=backups()
+    send_notice()
+    send_notice(stable=True)
     subprocess.run(['systemctl','restart','deploy-control'],check=True);time.sleep(7)
     assert backups()==saved and attempt()['phase']=='succeeded'
-    print('PASS: SSE → existing queue → public HTTPS verified dev → original installer; restart does not reinstall',flush=True)
+    print('PASS: Webhook → existing queue → public HTTPS verified dev → original installer; restart does not reinstall',flush=True)
     (ROOT/'notification-run').write_text('43')
+    send_notice('43')
     wait(lambda:attempt()['run_id']=='43' and attempt()['phase']=='failed','provenance mismatch refused')
     assert json.loads(Path('/opt/deploy-platform/current/manifest.json').read_text())['build']==manifest['build'] and backups()==saved
     downloads=(ROOT/'downloads-43').read_text()
+    send_notice('43')
     subprocess.run(['systemctl','restart','deploy-control'],check=True);time.sleep(7)
     assert (ROOT/'downloads-43').read_text()==downloads and backups()==saved and attempt()['phase']=='failed'
     subprocess.run(['cloudctl','update','policy','--dev-auto-upgrade','off'],check=True)
-    print('PASS: wrong embedded commit refused before installation; durable failure suppresses reconnect retry',flush=True)
+    print('PASS: wrong embedded commit refused before installation; durable failure suppresses duplicate/restart retry',flush=True)
 
 
 if __name__=='__main__':
     if not MARKER.exists():raise SystemExit('disposable notification node required')
     if sys.argv[1:] == ['setup']:setup()
-    elif sys.argv[1:] == ['events']:http.server.ThreadingHTTPServer(('127.0.0.1',8090),Events).serve_forever()
     elif sys.argv[1:] == ['releases']:
         server=http.server.ThreadingHTTPServer(('0.0.0.0',14443),Releases)
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain('/usr/local/share/ca-certificates/notification-test.crt',str(ROOT/'notification-test.key'))
         server.socket=context.wrap_socket(server.socket,server_side=True);server.serve_forever()
-    else:raise SystemExit('expected setup, releases or events')
+    else:raise SystemExit('expected setup or releases')

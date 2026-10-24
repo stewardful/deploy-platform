@@ -23,7 +23,7 @@ UBUNTU_VERSION=26.04 bash distribution/tests/upgrade-smoke.sh /ABS/deploy-platfo
 # 24.04 上真实历史版本到新版的升级
 UBUNTU_VERSION=24.04 bash distribution/tests/upgrade-smoke.sh /ABS/deploy-platform-0.5.2-linux-arm64.run /ABS/deploy-platform-0.5.3-linux-arm64.run /ABS/upgrade-demo.tar
 
-# 本机 SSE、默认关闭、dev 自动升级、错误来源拒绝与重启去重
+# 签名 Webhook、默认关闭、dev 自动升级、错误来源拒绝与重启去重
 UBUNTU_VERSION=26.04 bash distribution/tests/notification-smoke.sh /ABS/offline/deploy-platform-0.5.3-linux-arm64.run /ABS/dev/deploy-platform-0.5.3-linux-arm64.run
 ```
 

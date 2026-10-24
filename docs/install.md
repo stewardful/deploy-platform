@@ -144,7 +144,7 @@ VERSION=0.5.3 make release-build
 
 生成 `target/dist/*.run`、`.tar.gz`、`.sha256`。`package.py` 也可以接收已构建的 `--bin-dir`、`--web-dir` 和 `--runtime-archive`，会检查 ELF 架构和每个文件的摘要。`Dockerfile.agent` 可从其他系统构建 Linux Agent，Go 可交叉编译，Web 产物与架构无关。
 
-推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送发布公开预发布包，服务器通过本机 SSE 通知和本地策略拉取更新，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
+推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送发布公开预发布包，服务器通过Webhook 通知和本地策略拉取更新，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
 
 Ubuntu 26.04 的适配与本地安装、升级验收入口见 [Ubuntu 兼容性验证](ubuntu-compatibility.md)。
 
@@ -200,4 +200,4 @@ sudo cloudctl upgrade-dev --yes
 - 正式 `vX.Y.Z` Release：cloudctl、两种架构完整离线包及摘要。dev 只打平台更新包，基础运行时按锁定版本下载或复用。
 - 安装后的服务器：`/opt/deploy-platform/releases/` 存放不可变版本，`current` 指向当前版本；配置在 `/etc/deploy-platform/`，业务数据在 `/var/lib/deploy-platform/`。
 
-自动通知升级仅通过现有 Go 控制端订阅本机 SSE，dev 开关默认关闭，正式版只提示。使用 `sudo cloudctl update policy --dev-auto-upgrade on` 开启 dev 自动升级；详见 [CI/CD](ci-cd.md)。没有 SSH 自动部署或 cloudctl delivery 入口。
+自动通知升级仅通过现有 Go 控制端接收已验签 Webhook，dev 开关默认关闭，正式版只提示。使用 `sudo cloudctl update policy --dev-auto-upgrade on` 开启 dev 自动升级；详见 [CI/CD](ci-cd.md)。没有 SSH 自动部署或 cloudctl delivery 入口。

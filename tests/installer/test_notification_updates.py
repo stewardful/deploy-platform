@@ -80,8 +80,9 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(notice.receipt('owner/repo')['phase'],'skipped')
 
     def test_current_only_receipt_and_non_executable_request(self):
-        for extra in ({'url':'https://evil/installer'},{'command':'sh'},{'repository':'other/repo'},{'run_id':'0'},{'run_id':None},{'phase':'installing'},{'channel':'stable'}):
+        for extra in ({'url':'https://evil/installer'},{'command':'sh'},{'repository':'other/repo'},{'run_id':'0'},{'run_id':None},{'run_id':str(2**64)},{'phase':'installing'},{'channel':'stable'}):
             with self.assertRaises(ValueError):notice.execute(dict(self.request,**extra))
+        with self.assertRaises(ValueError):notice.execute({key:value for key,value in self.request.items() if key!='run_id'})
         self.install.assert_not_called()
         for value in ({},{'schema_version':0},{'schema_version':1,'repository':'owner/repo','run_id':'42','phase':'unknown'}):
             path=self.root/'notification-dev.json';path.write_text(json.dumps(value));path.chmod(0o600)

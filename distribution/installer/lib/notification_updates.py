@@ -10,7 +10,7 @@ def policy():
     repo, _ = worker.settings(read_token=False)
     config = json.loads(worker.private_read(worker.CONFIG, 4096)) if worker.CONFIG.exists() else {}
     section = config.get('notifications', {})
-    if not isinstance(section, dict) or type(section.get('dev_auto_upgrade', False)) is not bool:
+    if not isinstance(section, dict) or set(section)-{'dev_auto_upgrade','secret_file'} or type(section.get('dev_auto_upgrade', False)) is not bool:
         raise ValueError('invalid local notification policy')
     return repo, section.get('dev_auto_upgrade', False)
 
@@ -35,30 +35,29 @@ def execute(request):
     from dev_update import discover, execute as install
     repo, enabled = policy()
     run = request.get('run_id')
-    if request.get('channel') != 'dev-notice' or request.get('phase') != 'queued' or set(request)-{'channel','repository','run_id','phase'} or request.get('repository') != repo:
+    if request.get('channel') != 'dev-notice' or request.get('phase') != 'queued' or set(request)!={'channel','repository','run_id','phase'} or request.get('repository') != repo:
         raise ValueError('invalid notification request')
-    if 'run_id' in request and (not isinstance(run, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', run)):
+    if not isinstance(run, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', run) or int(run) >= 2**64:
         raise ValueError('invalid notification run')
     if not enabled:
         worker.report('', 'skipped', '本机未启用 dev 自动升级'); return
     if not worker.CURRENT.is_file(): raise ValueError('automatic updates require an installed platform')
     old = receipt(repo)
-    if run is not None and old is not None and int(run) <= int(old['run_id']):
+    if old is not None and int(run) <= int(old['run_id']):
         worker.report('', 'skipped', '该通知已处理，不自动重试'); return
     # Notification fields cannot advance the ledger: resolve a trusted public build first.
     candidate = discover(run)
     run = candidate['run_id']
     if old is not None and int(run) <= int(old['run_id']):
         worker.report(candidate['version'], 'skipped', '该构建已尝试，不自动重试'); return
-    if request.get('run_id') is not None:
-        try: latest = discover()
-        except urllib.error.HTTPError as error:
-            # The fixed build is published before the first latest pointer exists.
-            if error.code != 404: raise
-            latest = candidate
-        if int(latest['run_id']) > int(run):
-            record(repo, run, 'skipped')
-            worker.report(candidate['version'], 'skipped', '已有更新构建，忽略旧通知'); return
+    try: latest = discover()
+    except urllib.error.HTTPError as error:
+        # The fixed build is published before the first latest pointer exists.
+        if error.code != 404: raise
+        latest = candidate
+    if int(latest['run_id']) > int(run):
+        record(repo, run, 'skipped')
+        worker.report(candidate['version'], 'skipped', '已有更新构建，忽略旧通知'); return
     worker.ACTIVE_DETAILS.update(run_id=run, commit=candidate['commit'])
 
     def guard():

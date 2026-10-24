@@ -20,11 +20,38 @@ main 发版前提高 workspace 和内部组件版本，更新 Cargo.lock，验�
 
 ## 服务器如何接收通知
 
-[deploy-delivery 通知 API](https://github.com/stewardful/deploy-delivery) 是独立低权限服务。可部署在同一台 Ubuntu 上，通过 Caddy 只公开一个 HTTPS Webhook 路径；HMAC 密钥只配置在 GitHub 仓库 Webhooks 与该服务的私有文件中。它只提供消息，不执行 cloudctl，不持有平台权限。不是 Actions Secret。
+GitHub → HTTPS POST `/hooks/github/releases` → Go 控制端验签 → 持久化本地任务 → 现有升级 worker。平台直接处理，不依赖 deploy-delivery，不需要 SSE、额外常驻服务或版本轮询。公网只代理这一条 POST 路径到 `127.0.0.1:8088`；管理 API 仍要求 Bearer token，不要把它们一起公开。
 
-Go 控制端默认连接本机 `http://127.0.0.1:8090/v1/events`，一条 SSE 长连接接收完整 snapshot，15 秒心跳由通知服务提供。连接断开带退避重连，读取有超时，帧大小有上限，拒绝公网地址、主机名、跳转及请求中提供的下载地址。没有新常驻平台服务或定时版本轮询。API 未部署时，普通项目管理、手动更新仍可使用，网页显示通知未连接。
+唯一新增凭据是 Webhook 共享密钥，分别保存到 GitHub 源仓库 Settings → Webhooks → Secret 和服务器 `/etc/deploy-platform/webhook.secret`，不是 Actions Secret。服务器首次配置示例：
 
-消费者只接受本机配置仓库的消息。正式版通知只触发受限的可信 GitHub Release 检查，网页显示候选，必须用户在网页或 CLI 确认。通知不能提交正式升级。启动和 SSE 重连会补查一次正式版；不存在每小时自动版本检查。
+```bash
+sudo sh -c 'umask 077; openssl rand -hex 32 > /etc/deploy-platform/webhook.secret'
+```
+
+仅首次创建，已有密钥不要覆盖。配置 GitHub Webhook 时，在自己的可信终端读取该文件；不要把值放入仓库、日志或消息。使用 application/json、启用 SSL verification、只选择 Releases 事件，URL 为 `https://通知域名/hooks/github/releases`。凭据数秒内热加载，默认路径不用写配置。
+
+在单独维护的 Caddy 站点中加入以下路由；不要覆盖平台自动生成的业务代理配置：
+
+```caddyfile
+notify.example.com {
+    @release {
+        method POST
+        path /hooks/github/releases
+    }
+    handle @release {
+        reverse_proxy 127.0.0.1:8088
+    }
+    handle {
+        respond 404
+    }
+}
+```
+
+域名需解析到服务器，HTTPS 端口按正常 Caddy 配置开放。控制端仍只监听 loopback，8088 不对公网开放。没有配置密钥时 Webhook 返回 503，普通项目管理、手动更新仍可使用。
+
+原始正文使用 HMAC-SHA256 常量时间验签，固定仓库，只接收 release/published 的固定 dev 构建或正式版本。正文上限 256 KiB、并发上限 8，忽略草稿、其他事件和滚动 dev-latest。不使用正文中的下载地址、路径或命令。签名正确的 ping/无关事件返回 204；有效发布可靠落盘后返回 200，磁盘或队列持久化失败返回 503。HTTP 请求不等待下载安装。
+
+最新两个通道及 dev 提交标记保存在私有 `notification-inbox.json`，原子落盘并 fsync，重启继续处理。较旧和重复版本不会推进状态。正式通知仅触发可信 GitHub Release 检查，候选必须由用户在网页或 CLI 确认；不会自动提交正式升级。启动补查一次正式版，没有每小时版本检查。
 
 ## dev 自动升级的唯一开关
 
@@ -45,20 +72,20 @@ sudo cloudctl update policy --dev-auto-upgrade off
 {"repository":"stewardful/deploy-platform","notifications":{"dev_auto_upgrade":true}}
 ```
 
-CLI 保留既有仓库/正式版私有 token 配置，不打印密钥。通知和公开 dev 下载不读取该 token。通知 API 使用非默认本机端口时才需添加 `notifications.endpoint`，必须是 loopback IP 的 `/v1/events`，修改地址后重启 deploy-control；默认地址不用填写。
+CLI 保留既有仓库/正式版私有 token 配置，不打印密钥。公开 dev 下载不读取该 token。只有密钥采用非默认路径时才需添加 `notifications.secret_file`，必须是私有文件的绝对路径；不保留旧 endpoint 配置。
 
-打开后，启动、SSE 重连或新 dev 消息会提交一个有限的本地检查请求。Go 与 CLI 共用提交锁、更新目录和独立 systemd worker。worker 再次读取本地开关、重新核对固定公开清单、架构/大小/摘要和包内来源，再走原安装器的兼容性检查、排空、备份、业务验证和失败回退。下载后、进入安装前还会再检查开关；关闭不会强行中断已开始的安装事务。
+打开后，已持久化的新 dev 通知会提交一个有限的本地升级请求。关闭期间收到的最新通知会保留，开启后处理；没有收到的通知不会凭空执行。Go 与 CLI 共用提交锁、更新目录和独立 systemd worker。worker 再次读取本地开关、重新核对固定公开清单、架构/大小/摘要和包内来源，再走原安装器的兼容性检查、排空、备份、业务验证和失败回退。下载后、进入安装前还会再检查开关；关闭不会强行中断已开始的安装事务。
 
-只有已在 GitHub 公开清单验证的构建才能推进 `/var/lib/deploy-platform/updates/notification-dev.json`。安装前记录 attempted，完成记 succeeded，失败记 failed；较旧、同一构建及已安装提交不会重复安装。重启、重复消息或消费者重连不能重试已尝试构建。发现阶段尚未核验的网络失败不推进记录，可在后续重连补查；不要靠删除记录强制重试，排错后用手动 `cloudctl upgrade-dev --run-id ID --yes` 明确重试。
+只有已在 GitHub 公开清单验证的构建才能推进 `/var/lib/deploy-platform/updates/notification-dev.json`。安装前记录 attempted，完成记 succeeded，失败记 failed；较旧、同一构建及已安装提交不会重复安装。重启或重复消息不能重试已提交构建。发现阶段的失败同样不自动循环重试；不要靠删除记录强制重试，排错后用手动 `cloudctl upgrade-dev --run-id ID --yes` 明确重试。
 
 任务冲突时只等待本地队列空闲，不重复下载或并发安装。缺失业务探针、版本/运行时/schema 不兼容等保护不会因 dev 自动模式而跳过。正式生产节点应保持 dev 自动升级关闭。
 
 ## 状态、首次安装和验证
 
-网页显示通知连接状态、dev 自动开关、收到的构建提示和失败记录；“收到通知”不等于安装成功。`cloudctl update status` 和 `cloudctl system-logs update` 查询真正执行状态。首次安装仍用 cloudctl，见 [安装指南](install.md#统一-cloudctl-首次安装)。
+网页显示 Webhook 配置状态、dev 自动开关、收到的构建提示和失败记录；“收到通知”不等于安装成功。`cloudctl update status` 和 `cloudctl system-logs update` 查询真正执行状态。首次安装仍用 cloudctl，见 [安装指南](install.md#统一-cloudctl-首次安装)。
 
-GitHub Webhook 可能漏送；消费者在启动/重连时补查可信发布源。持续断线时不会每分钟查版本；可在本机手动检查。通知服务失败投递可在 GitHub Recent Deliveries 重投。dev 本地开关关闭时不检查或安装 dev 包；正式版始终只提示手动确认。
+GitHub Webhook 可能漏送，服务不可用时投递会失败；可在 GitHub Recent Deliveries 手动 Redeliver。已经成功入队的通知会在平台重启后恢复。没有收到的 dev 通知用 `cloudctl upgrade-dev --yes` 明确检查并升级，不增加后台版本轮询。默认关闭 dev 自动升级；正式版始终只提示手动确认。
 
-[Go SSE 客户端](../apps/controlplane/notifications/client.go) 不依赖私有仓库 SDK；两仓库仅通过本机 HTTP/SSE 契约连接，无 GitHub App 或相互触发。组件测试覆盖消息、超时、来源、并发锁、策略变更、重复与失败抑制，原 Ubuntu 升级测试继续验证业务数据保留和失败回退。
+[可复用 Webhook 处理组件](../apps/controlplane/notifications/handler.go) 与升级实现解耦，通过固定的 Go 回调提交有限的 Notice；不依赖私有仓库 SDK。组件测试覆盖验签、来源、正文上限、持久化、并发锁、策略变更、重复与失败抑制；原 Ubuntu 升级测试继续验证业务数据保留和失败回退。
 
-本变更未部署用户服务器；需先审核合并两仓库相关 PR，再安装通知服务、配置 HTTPS Webhook 并首次发布 dev 包。新 dev-release.yml 是只发布的独立工作流，不要恢复旧已暂停的 SSH 工作流。
+本变更未部署用户服务器；需先审核合并平台 PR，再配置 HTTPS Webhook 并首次发布 dev 包。deploy-delivery 是其他项目可选的独立验签转发工具，本平台无需安装它。新 dev-release.yml 是只发布的独立工作流，不要恢复旧已暂停的 SSH 工作流。

@@ -151,7 +151,7 @@ it('discovers and explicitly approves upgrades without passing URLs or commands'
     current: '0.5.1',
     candidate: null,
     notifications: {
-      connected: true,
+      enabled: true,
       dev_auto_upgrade: false,
       dev_tag: 'dev-42',
       error: '',

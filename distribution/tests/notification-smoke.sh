@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real Go SSE and protected dev worker on a disposable local Ubuntu node; no SSH.
+# Signed Webhook and protected dev worker on a disposable local Ubuntu node; no SSH.
 set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 source "$ROOT/distribution/tests/node-exec.sh"
@@ -13,7 +13,7 @@ NAME=cloud-notification-test-$$
 cleanup() {
     local status=$?
     if (( status != 0 )); then
-        node_exec "$NAME" journalctl -u deploy-control -u deploy-update -u notification-test-events -u notification-test-releases -n 100 --no-pager || true
+        node_exec "$NAME" journalctl -u deploy-control -u deploy-update -u notification-test-releases -n 100 --no-pager || true
     fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     rm -rf -- "$WORK"

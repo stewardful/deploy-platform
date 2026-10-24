@@ -49,6 +49,8 @@ def main(argv):
     if args.command == 'update':
         if args.dev_auto_upgrade is not None and args.action != 'policy': raise ValueError('policy option requires update policy')
         if args.action == 'policy':
+            from notification_updates import policy
+            policy()  # Validate before changing any local configuration.
             cfg = json.loads(worker.private_read(worker.CONFIG, 4096)) if worker.CONFIG.exists() or worker.CONFIG.is_symlink() else {}
             section = cfg.get('notifications', {})
             if not isinstance(section, dict): raise ValueError('invalid local notification configuration')
@@ -58,7 +60,6 @@ def main(argv):
                 if section: cfg['notifications'] = section
                 else: cfg.pop('notifications', None)
                 write_record(worker.CONFIG, cfg)
-            from notification_updates import policy
             repo, enabled = policy()
             result = {'repository': repo, 'dev_auto_upgrade': enabled}
         elif args.action == 'check':

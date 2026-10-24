@@ -10,7 +10,7 @@ test('new release is shown and upgrade requires explicit confirmation; reconnect
     current: '0.5.1',
     candidate: { version: '0.5.2', asset_id: 12, size: 42, digest: 'sha256:' + 'a'.repeat(64) },
     notifications: {
-      connected: true,
+      enabled: true,
       dev_auto_upgrade: false,
       dev_tag: 'dev-42',
       error: '',
@@ -37,6 +37,7 @@ test('new release is shown and upgrade requires explicit confirmation; reconnect
   await page.getByRole('button', { name: '进入工作台' }).click();
   await expect(page.getByText('发现新版本 0.5.2')).toBeVisible();
   await expect(page.getByText(/dev 自动升级：关闭/)).toBeVisible();
+  await expect(page.getByText(/已配置 Webhook/)).toBeVisible();
   await expect(page.getByText(/收到 dev-42 通知/)).toBeVisible();
   expect(submissions).toBe(0);
   await page.getByRole('button', { name: '升级到 0.5.2' }).click();

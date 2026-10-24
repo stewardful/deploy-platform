@@ -75,4 +75,4 @@ make web-e2e
 - 后台恢复针对容器进程；HTTP 健康检查为按需快照，不自动触发重启或后台告警。
 - 本地 Ubuntu ARM64 已完成真实运行验收；AMD64 与公网云节点的验证边界见测试报告。2 GiB 不代表可以运行任意数量的服务或本地大模型。
 
-Rust 组件暂设 `publish = false`，Go 模块使用本地模块路径。正式对外发布前需确定实际仓库路径、许可证、公共 API 和版本策略；推送 main 会触发 GitHub Release 工作流，dev 推送发布公开预发布包，服务器通过本机 SSE 通知和本地开关决定 dev 自动升级，配置见 [CI/CD](docs/ci-cd.md)；服务器只检查更新，必须由管理员确认升级。组件库本身尚未发布至 crates.io/npm/Go 公共模块。
+Rust 组件暂设 `publish = false`，Go 模块使用本地模块路径。正式对外发布前需确定实际仓库路径、许可证、公共 API 和版本策略；推送 main 会触发 GitHub Release 工作流，dev 推送发布公开预发布包，服务器通过Webhook 通知和本地开关决定 dev 自动升级，配置见 [CI/CD](docs/ci-cd.md)；正式版只检查更新，必须由管理员确认升级。组件库本身尚未发布至 crates.io/npm/Go 公共模块。

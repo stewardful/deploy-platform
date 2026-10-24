@@ -45,7 +45,7 @@ jobs:
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}
         run: bash distribution/tests/ubuntu-smoke.sh "$GITHUB_WORKSPACE"/offline/deploy-platform-*-linux-amd64.run
-      - name: Verify local SSE and protected dev automatic upgrades
+      - name: Verify signed Webhooks and protected dev automatic upgrades
         if: matrix.ubuntu == '26.04'
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}

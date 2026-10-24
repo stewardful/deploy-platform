@@ -4,10 +4,8 @@ import (
 	"context"
 	"deploy-platform.local/controlplane/notifications"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,17 +33,11 @@ func notificationService(t *testing.T, auto bool, source string, attempt string,
 			t.Fatal(err)
 		}
 	}
-	n := notifications.Notice{Repository: source, Channel: "dev", Tag: "dev-42", ReleaseID: 1, PublishedAt: time.Now().UTC()}
-	stable := notifications.Notice{Repository: source, Channel: "stable", Tag: "v0.5.2", ReleaseID: 2, PublishedAt: time.Now().UTC()}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		data, _ := json.Marshal(notifications.Snapshot{Revision: 1, Latest: map[string]notifications.Notice{"dev": n, "stable": stable}})
-		fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", data)
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	config, _ := json.Marshal(Settings{Repository: "stewardful/deploy-platform", Notifications: NotificationSettings{Endpoint: server.URL + "/v1/events", DevAutoUpgrade: auto}})
+	secret := filepath.Join(s.dir, "webhook.secret")
+	if err := os.WriteFile(secret, []byte(strings.Repeat("a", 32)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config, _ := json.Marshal(Settings{Repository: "stewardful/deploy-platform", Notifications: NotificationSettings{SecretFile: secret, DevAutoUpgrade: auto}})
 	if err := os.WriteFile(s.config, config, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +47,21 @@ func notificationService(t *testing.T, auto bool, source string, attempt string,
 	for _, setup := range beforeStart {
 		setup(s)
 	}
+	n := notifications.Notice{Repository: source, Channel: "dev", Tag: "dev-42", ReleaseID: 1, PublishedAt: time.Now().UTC()}
+	err := s.acceptNotice(n)
+	if source == "stewardful/deploy-platform" && err != nil {
+		t.Fatal(err)
+	}
+	if source != "stewardful/deploy-platform" && err == nil {
+		t.Fatal("wrong source accepted")
+	}
+	if source == "stewardful/deploy-platform" {
+		n.Channel = "stable"
+		n.Tag = "v0.5.2"
+		if err := s.acceptNotice(n); err != nil {
+			t.Fatal(err)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); s.Run(ctx) }()
@@ -63,7 +70,7 @@ func notificationService(t *testing.T, auto bool, source string, attempt string,
 		select {
 		case <-done:
 		case <-time.After(time.Second):
-			t.Error("consumer did not stop")
+			t.Error("worker did not stop")
 		}
 	})
 	return s, cancel, done
@@ -72,7 +79,7 @@ func TestStableNoticeOnlyDiscoversAndDevAutoDefaultsOff(t *testing.T) {
 	s, _, _ := notificationService(t, false, "stewardful/deploy-platform", "")
 	waitFor(t, func() bool { return s.Status().Candidate != nil })
 	status := s.Status()
-	if !status.Notifications.Connected || status.Notifications.DevAutoUpgrade || status.Notifications.DevTag != "dev-42" {
+	if !status.Notifications.Enabled || status.Notifications.DevAutoUpgrade || status.Notifications.DevTag != "dev-42" {
 		t.Fatal(status)
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, "request.json")); !os.IsNotExist(err) {
@@ -95,10 +102,10 @@ func TestEnabledDevQueuesOnlyFixedHintToExistingWorker(t *testing.T) {
 		t.Fatal("executable metadata queued")
 	}
 }
-func TestFailedVerifiedBuildIsNotQueuedOnReconnectOrRestart(t *testing.T) {
+func TestFailedVerifiedBuildIsNotQueuedOnDuplicateOrRestart(t *testing.T) {
 	ledger := `{"schema_version":1,"repository":"stewardful/deploy-platform","run_id":"42","phase":"failed"}`
 	s, _, _ := notificationService(t, true, "stewardful/deploy-platform", ledger)
-	waitFor(t, func() bool { return s.Status().Notifications.Connected })
+	waitFor(t, func() bool { return s.Status().Notifications.Enabled })
 	if _, err := os.Stat(filepath.Join(s.dir, "request.json")); !os.IsNotExist(err) {
 		t.Fatal("failed build retried")
 	}
@@ -108,7 +115,7 @@ func TestFailedVerifiedBuildIsNotQueuedOnReconnectOrRestart(t *testing.T) {
 }
 func TestWrongNotificationRepositoryAndMalformedLedgerFailClosed(t *testing.T) {
 	s, _, _ := notificationService(t, false, "fork/repo", "")
-	waitFor(t, func() bool { return s.Status().Notifications.Error != "" })
+	waitFor(t, func() bool { return s.Status().Notifications.Enabled })
 	if _, err := os.Stat(filepath.Join(s.dir, "request.json")); !os.IsNotExist(err) {
 		t.Fatal("untrusted source queued")
 	}
@@ -141,7 +148,7 @@ func TestPendingAutomaticNoticeWaitsForExistingTaskWithoutResubmittingIt(t *test
 			t.Fatal(err)
 		}
 	})
-	waitFor(t, func() bool { return s.Status().Notifications.Connected })
+	waitFor(t, func() bool { return s.Status().Notifications.Enabled })
 	if _, err := os.Stat(filepath.Join(s.dir, "request.json")); !os.IsNotExist(err) {
 		t.Fatal("auto request overlapped active task")
 	}
@@ -152,5 +159,104 @@ func TestPendingAutomaticNoticeWaitsForExistingTaskWithoutResubmittingIt(t *test
 	data, _ := privateRead(filepath.Join(s.dir, "request.json"), 4096)
 	if !strings.Contains(string(data), `"run_id":"42"`) {
 		t.Fatal("pending fixed build was lost")
+	}
+}
+
+func TestWebhookInboxPersistsAndOlderDuplicatesDoNotAdvance(t *testing.T) {
+	s := fixture(t)
+	n := notifications.Notice{Repository: "stewardful/deploy-platform", Channel: "dev", Tag: "dev-42", ReleaseID: 1, PublishedAt: time.Now().UTC()}
+	if err := s.acceptNotice(n); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(s.dir, "notification-inbox.json"))
+	for _, tag := range []string{"dev-42", "dev-41"} {
+		n.Tag = tag
+		if err := s.acceptNotice(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, _ := os.ReadFile(filepath.Join(s.dir, "notification-inbox.json"))
+	if string(before) != string(after) {
+		t.Fatal("duplicate/older event changed durable inbox")
+	}
+	restarted := &Service{dir: s.dir}
+	inbox, err := restarted.inbox()
+	if err != nil || inbox.Latest["dev"].Tag != "dev-42" {
+		t.Fatal("restart lost notification", err)
+	}
+	if err := os.Chmod(filepath.Join(s.dir, "notification-inbox.json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	n.Tag = "dev-43"
+	if err := s.acceptNotice(n); err == nil {
+		t.Fatal("untrusted inbox accepted")
+	}
+}
+func TestSubmittedTaskDoesNotRetryAfterResultIsReplaced(t *testing.T) {
+	s, cancel, done := notificationService(t, true, "stewardful/deploy-platform", "")
+	waitFor(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		inbox, err := s.inbox()
+		return err == nil && inbox.Submitted == "42"
+	})
+	cancel()
+	<-done
+	if err := os.Remove(filepath.Join(s.dir, "request.json")); err != nil {
+		t.Fatal(err)
+	}
+	// Another manual operation may replace result.json. The inbox must still remember submission.
+	if err := os.WriteFile(filepath.Join(s.dir, "result.json"), []byte(`{"channel":"stable","phase":"succeeded"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	restartedDone := make(chan struct{})
+	go func() { defer close(restartedDone); s.Run(ctx) }()
+	n := notifications.Notice{Repository: "stewardful/deploy-platform", Channel: "dev", Tag: "dev-42", ReleaseID: 1, PublishedAt: time.Now().UTC()}
+	if err := s.acceptNotice(n); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	stop()
+	<-restartedDone
+	if _, err := os.Stat(filepath.Join(s.dir, "request.json")); !os.IsNotExist(err) {
+		t.Fatal("submitted build retried after restart")
+	}
+}
+
+func TestNewAcknowledgedNoticeCannotBeOverwrittenByStaleWork(t *testing.T) {
+	s := fixture(t)
+	n := notifications.Notice{Repository: "stewardful/deploy-platform", Channel: "dev", Tag: "dev-43", ReleaseID: 1, PublishedAt: time.Now().UTC()}
+	if err := s.acceptNotice(n); err != nil {
+		t.Fatal(err)
+	}
+	stable := n
+	stable.Channel = "stable"
+	stable.Tag = "v0.5.9"
+	if err := s.acceptNotice(stable); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.submitDev(n.Repository, "42"); err != ErrConflict {
+		t.Fatal("stale work submitted", err)
+	}
+	if err := s.submitDev(n.Repository, "43"); err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := s.inbox()
+	if err != nil || inbox.Latest["dev"].Tag != "dev-43" || inbox.Latest["stable"].Tag != "v0.5.9" || inbox.Submitted != "43" {
+		t.Fatal("lost acknowledged notice", inbox, err)
+	}
+}
+
+func TestOnlyCurrentWebhookConfigurationIsAccepted(t *testing.T) {
+	s := fixture(t)
+	for _, config := range []string{`{"notifications":{"endpoint":"http://127.0.0.1:8090/v1/events"}}`, `{"notifications":{"secret_file":"relative.secret"}}`, `{"notifications":{"dev_auto_upgrade":"true"}}`} {
+		if err := os.WriteFile(s.config, []byte(config), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.loadSettings(false); err == nil {
+			t.Fatal("unsupported configuration accepted", config)
+		}
 	}
 }

@@ -126,7 +126,8 @@ export function PlatformUpdates({
       )}
       {status?.enabled && (
         <p className="muted">
-          发布通知：{status.notifications.connected ? '已连接' : '未连接'} · dev 自动升级：
+          发布通知：{status.notifications.enabled ? '已配置 Webhook' : '未配置 Webhook'} · dev
+          自动升级：
           {status.notifications.dev_auto_upgrade ? '开启' : '关闭'}
           {status.notifications.dev_tag && ` · 收到 ${status.notifications.dev_tag} 通知`}
         </p>

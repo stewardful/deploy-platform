@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,7 +23,7 @@ type AutoAttempt struct {
 	Phase      string `json:"phase"`
 }
 type NotificationStatus struct {
-	Connected      bool         `json:"connected"`
+	Enabled        bool         `json:"enabled"`
 	DevAutoUpgrade bool         `json:"dev_auto_upgrade"`
 	DevTag         string       `json:"dev_tag"`
 	Error          string       `json:"error"`
@@ -69,164 +71,171 @@ func newerRun(a, b string) bool {
 	return e == nil && (b == "" || f == nil && x > y)
 }
 
-type notificationFrame struct {
-	snapshot   notifications.Snapshot
-	reconnect  bool
-	generation uint64
+// Inbox is a bounded, durable task hint. Only validated webhook fields enter it.
+type noticeInbox struct {
+	Submitted string                          `json:"submitted"`
+	Schema    int                             `json:"schema_version"`
+	Latest    map[string]notifications.Notice `json:"latest"`
 }
 
-// Run keeps one local SSE connection; retries reconnects/queued work, never polls versions.
-func (s *Service) Run(ctx context.Context) {
-	cfg, _, err := s.loadSettings(false)
-	if err != nil {
-		s.mu.Lock()
-		s.status.Notifications.Error = "通知配置不可用"
-		s.mu.Unlock()
-		return
+func (s *Service) inbox() (noticeInbox, error) {
+	value := noticeInbox{Schema: 1, Latest: map[string]notifications.Notice{}}
+	path := filepath.Join(s.dir, "notification-inbox.json")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return value, nil
 	}
-	client, err := notifications.New(cfg.Notifications.Endpoint)
+	data, err := privateRead(path, 4096)
 	if err != nil {
-		s.mu.Lock()
-		s.status.Notifications.Error = "通知接口必须是本机 SSE 地址"
-		s.mu.Unlock()
-		return
+		return value, err
 	}
-	frames := make(chan notificationFrame, 1)
-	disconnected := make(chan uint64, 1)
-	go func() {
-		delay := time.Second
-		var generation uint64
-		for ctx.Err() == nil {
-			generation++
-			first := true
-			received := false
-			_ = client.Stream(ctx, func(snapshot notifications.Snapshot) {
-				frame := notificationFrame{snapshot: snapshot, reconnect: first, generation: generation}
-				first = false
-				received = true
-				select {
-				case previous := <-frames:
-					frame.reconnect = frame.reconnect || previous.reconnect
-				default:
-				}
-				select {
-				case frames <- frame:
-				case <-ctx.Done():
-				}
-			})
-			if ctx.Err() != nil {
-				return
-			}
-			select {
-			case disconnected <- generation:
-			default:
-			}
-			if received {
-				delay = time.Second
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-			if delay < 30*time.Second {
-				delay *= 2
-				if delay > 30*time.Second {
-					delay = 30 * time.Second
-				}
-			}
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	if d.Decode(&value) != nil || d.Decode(new(any)) != io.EOF || value.Schema != 1 || value.Latest == nil || len(value.Latest) > 2 {
+		return value, ErrUnavailable
+	}
+	if value.Submitted != "" {
+		if _, err := runNumber(value.Submitted); err != nil {
+			return value, ErrUnavailable
 		}
-	}()
-	// One boot check supplements missed webhooks. No hourly version timer remains.
-	boot := time.NewTimer(10 * time.Second)
-	defer boot.Stop()
+	}
+	for k, n := range value.Latest {
+		if k != n.Channel || !n.Valid() {
+			return value, ErrUnavailable
+		}
+	}
+	return value, nil
+}
+func (s *Service) acceptNotice(n notifications.Notice) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg, _, err := s.loadSettings(false)
+	if err != nil || n.Repository != cfg.Repository || !n.Valid() {
+		return ErrUnavailable
+	}
+	inbox, err := s.inbox()
+	if err != nil {
+		return err
+	}
+	old, exists := inbox.Latest[n.Channel]
+	if exists && (n.Channel == "dev" && !newerRun(strings.TrimPrefix(n.Tag, "dev-"), strings.TrimPrefix(old.Tag, "dev-")) || n.Channel == "stable" && !newer(strings.TrimPrefix(n.Tag, "v"), strings.TrimPrefix(old.Tag, "v"))) {
+		return nil
+	}
+	inbox.Latest[n.Channel] = n
+	if err := s.writeInbox(inbox); err != nil {
+		return err
+	}
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (s *Service) writeInbox(inbox noticeInbox) error {
+	data, err := json.Marshal(inbox)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(s.dir, ".notice-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), filepath.Join(s.dir, "notification-inbox.json"))
+	}
+	if err != nil {
+		return err
+	}
+	dir, err := os.Open(s.dir)
+	if err != nil {
+		return err
+	}
+	err = dir.Sync()
+	_ = dir.Close()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// WebhookHandler only verifies and persists work; it never waits for an upgrade.
+func (s *Service) WebhookHandler() http.Handler {
+	return notifications.NewHandler(func() (notifications.Config, error) {
+		cfg, _, err := s.loadSettings(false)
+		if err != nil || !filepath.IsAbs(cfg.Notifications.SecretFile) {
+			return notifications.Config{}, ErrUnavailable
+		}
+		secret, err := privateRead(cfg.Notifications.SecretFile, 1024)
+		return notifications.Config{Repository: cfg.Repository, Secret: bytes.TrimSpace(secret)}, err
+	}, s.acceptNotice)
+}
+
+// Run processes the local inbox. Its ticker retries busy tasks, not GitHub version polling.
+func (s *Service) Run(ctx context.Context) {
 	retry := time.NewTicker(5 * time.Second)
 	defer retry.Stop()
-	var lastDisconnected uint64
-	pendingRun := ""
-	reconcile := true
-	stablePending := false
-	previousAuto := false
+	boot := time.NewTimer(10 * time.Second)
+	defer boot.Stop()
+	stableTag := ""
+	bootCheck := false
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-boot.C:
-			stablePending = true
+		case <-s.wake:
 		case <-retry.C:
-		case generation := <-disconnected:
-			lastDisconnected = generation
-			s.mu.Lock()
-			s.status.Notifications.Connected = false
-			s.status.Notifications.Error = "通知连接已断开，正在重连"
-			s.mu.Unlock()
-		case frame := <-frames:
-			cfg, _, err = s.loadSettings(false)
-			if err != nil {
-				continue
-			}
-			valid := true
-			for _, n := range frame.snapshot.Latest {
-				if n.Repository != cfg.Repository {
-					valid = false
-				}
-			}
-			if !valid {
-				s.mu.Lock()
-				s.status.Notifications.Error = "通知来源与本机仓库不符"
-				s.mu.Unlock()
-				continue
-			}
-			s.mu.Lock()
-			s.status.Notifications.Connected = frame.generation > lastDisconnected
-			if s.status.Notifications.Connected {
-				s.status.Notifications.Error = ""
-			}
-			if dev, ok := frame.snapshot.Latest["dev"]; ok {
-				s.status.Notifications.DevTag = dev.Tag
-				run := strings.TrimPrefix(dev.Tag, "dev-")
-				if newerRun(run, pendingRun) {
-					pendingRun = run
-				}
-			}
-			s.mu.Unlock()
-			if frame.reconnect {
-				reconcile = true
-				stablePending = true
-			}
-			if n, ok := frame.snapshot.Latest["stable"]; ok {
-				s.mu.Lock()
-				c := s.status.Candidate
-				needs := c == nil || c.Version != strings.TrimPrefix(n.Tag, "v")
-				s.mu.Unlock()
-				if needs {
-					stablePending = true
-				}
-			}
+		case <-boot.C:
+			bootCheck = true
 		}
-		if stablePending {
-			s.mu.Lock()
-			ready := s.last.IsZero() || s.now().Sub(s.last) >= time.Minute
-			s.mu.Unlock()
-			if ready {
-				_, _ = s.Check(ctx)
-				stablePending = false
-			} // discovery only; never Upgrade.
-		}
-		cfg, _, err = s.loadSettings(false)
-		if err == nil && cfg.Notifications.DevAutoUpgrade && !previousAuto {
-			reconcile = true
-		}
-		previousAuto = err == nil && cfg.Notifications.DevAutoUpgrade
+		cfg, _, err := s.loadSettings(false)
 		s.mu.Lock()
 		s.status.Notifications.DevAutoUpgrade = err == nil && cfg.Notifications.DevAutoUpgrade
+		secret, secretErr := privateRead(cfg.Notifications.SecretFile, 1024)
+		s.status.Notifications.Enabled = err == nil && secretErr == nil && len(bytes.TrimSpace(secret)) >= 32
+		inbox, inboxErr := s.inbox()
+		if inboxErr != nil {
+			s.status.Notifications.Error = "通知任务记录异常，请手动检查"
+		}
 		s.mu.Unlock()
-		if err != nil || notifications.ValidateEndpoint(cfg.Notifications.Endpoint) != nil || !cfg.Notifications.DevAutoUpgrade {
+		if err != nil || inboxErr != nil {
 			continue
 		}
-		if pendingRun == "" && !reconcile {
+		for _, n := range inbox.Latest {
+			if n.Repository != cfg.Repository {
+				inboxErr = ErrUnavailable
+			}
+		}
+		if inboxErr != nil {
 			continue
 		}
+		stableNotice, hasStable := inbox.Latest["stable"]
+		s.mu.Lock()
+		ready := s.last.IsZero() || s.now().Sub(s.last) >= time.Minute
+		s.mu.Unlock()
+		if ready && (bootCheck || hasStable && stableTag != stableNotice.Tag) {
+			_, _ = s.Check(ctx)
+			stableTag = stableNotice.Tag
+			bootCheck = false
+		}
+		dev, ok := inbox.Latest["dev"]
+		if !ok {
+			continue
+		}
+		s.mu.Lock()
+		s.status.Notifications.DevTag = dev.Tag
+		s.mu.Unlock()
+		if !cfg.Notifications.DevAutoUpgrade {
+			continue
+		}
+		run := strings.TrimPrefix(dev.Tag, "dev-")
 		attempt, err := s.lastAttempt(cfg.Repository)
 		if err != nil {
 			s.mu.Lock()
@@ -234,31 +243,51 @@ func (s *Service) Run(ctx context.Context) {
 			s.mu.Unlock()
 			continue
 		}
-		if attempt != nil {
-			if pendingRun != "" && !newerRun(pendingRun, attempt.RunID) {
-				pendingRun = ""
-			}
-			if attempt.Phase == "failed" || attempt.Phase == "attempted" {
-				reconcile = false
-			}
-		}
-		if pendingRun == "" && !reconcile {
+		if inbox.Submitted != "" && !newerRun(run, inbox.Submitted) {
 			continue
 		}
-		request := struct {
-			Channel    string `json:"channel"`
-			Repository string `json:"repository"`
-			RunID      string `json:"run_id,omitempty"`
-			Phase      string `json:"phase"`
-		}{"dev-notice", cfg.Repository, pendingRun, "queued"}
-		s.mu.Lock()
-		err = s.publishRequest(request)
-		if err == nil {
-			pendingRun = ""
-			reconcile = false
-		} else if err != ErrConflict {
-			s.status.Notifications.Error = "无法提交自动升级，请检查节点状态"
+		if attempt != nil && !newerRun(run, attempt.RunID) {
+			continue
 		}
-		s.mu.Unlock()
+		err = s.submitDev(cfg.Repository, run)
+		if err != nil && !errors.Is(err, ErrConflict) {
+			s.mu.Lock()
+			s.status.Notifications.Error = "无法提交自动升级，请检查节点状态"
+			s.mu.Unlock()
+		}
 	}
+}
+
+// submitDev re-reads durable inbox state while holding the submission-side mutex.
+func (s *Service) submitDev(repo, run string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inbox, err := s.inbox()
+	if err != nil {
+		return err
+	}
+	dev := inbox.Latest["dev"]
+	if dev.Repository != repo || dev.Tag != "dev-"+run {
+		return ErrConflict
+	}
+	if inbox.Submitted != "" && !newerRun(run, inbox.Submitted) {
+		return nil
+	}
+	request := struct {
+		Channel    string `json:"channel"`
+		Repository string `json:"repository"`
+		RunID      string `json:"run_id"`
+		Phase      string `json:"phase"`
+	}{"dev-notice", repo, run, "queued"}
+	// A crash between queue and inbox commit can leave a terminal result.
+	var result Execution
+	data, readErr := privateRead(filepath.Join(s.dir, "result.json"), 4096)
+	completed := readErr == nil && json.Unmarshal(data, &result) == nil && result.Channel == "dev-notice" && result.RunID == run && (result.Phase == "failed" || result.Phase == "succeeded" || result.Phase == "skipped")
+	if !completed {
+		if err := s.publishRequest(request); err != nil {
+			return err
+		}
+	}
+	inbox.Submitted = run
+	return s.writeInbox(inbox)
 }
