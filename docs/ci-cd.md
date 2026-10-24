@@ -12,7 +12,9 @@ PR、dev 和 main 复用 [构建工作流](../.github/workflows/build-installers
 
 ## GitHub Secrets 与 Variables
 
-在仓库 Settings → Secrets and variables → Actions 中配置以下 **Repository secrets**（只打包发布时均不需要；开启服务器自动部署后才需要），无需把凭据交给聊天或写进源码：
+**只构建、发布公开 dev 包并在服务器手动安装：零自定义 Secrets、零 Repository variables。** GitHub 自动提供发布所需的 GITHUB_TOKEN；工作流未设置部署开关时默认不部署。
+
+以后启用 SSH 自动部署，才在仓库 Settings → Secrets and variables → Actions 配置以下四项 **Repository secrets**，无需把凭据交给聊天或写进源码：
 
 | Secret | 内容 |
 | --- | --- |
@@ -20,13 +22,14 @@ PR、dev 和 main 复用 [构建工作流](../.github/workflows/build-installers
 | `TEST_SSH_KNOWN_HOSTS` | 经核对的服务器 known_hosts 完整记录，不是只有 SHA256 指纹 |
 | `TEST_SERVER_HOST` | 测试服务器 IP 或域名，不带用户名、协议、路径或端口；IPv6 使用不带方括号的地址 |
 | `TEST_SERVER_USER` | SSH 用户，例如 `ubuntu`；需要无交互 root 管理权限 |
-| `TEST_SERVER_PORT` | SSH 端口；不配置时默认 22，改用其他端口时在 Secrets 中填写 |
 
-服务器 SSH 端口需允许 GitHub runner 连接。再配置 **Repository variables**：
+服务器 SSH 端口需允许 GitHub runner 连接。只有启用自动部署或偏离默认值时才配置以下选项；使用 22 端口和 amd64 不需要额外条目：
 
-| Variable | 默认值 | 说明 |
+| 可选配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `TEST_SERVER_ARCH` | `amd64` | `uname -m` 为 x86_64 选 amd64；aarch64/arm64 选 arm64 |
+| Variable `TEST_SERVER_AUTO_DEPLOY` | 关闭 | 仅值为 `true` 才自动部署；关闭时删除该变量即可 |
+| Variable `TEST_SERVER_ARCH` | `amd64` | 仅 arm64 测试机需要填写 `arm64`，不影响发布双架构包 |
+| Secret `TEST_SERVER_PORT` | `22` | 仅使用非 22 SSH 端口时填写 |
 
 `TEST_SSH_PRIVATE_KEY` 是进入服务器的 SSH 凭据，与服务器拉取私有 GitHub Release 使用的 Contents:read token 是两种凭据。dev 流程使用 Actions 自带的短期 `GITHUB_TOKEN`（`actions: read`）在 CI 端获取产物下载地址，只通过 SSH 标准输入交给服务器；不新增用户 Secret，不在服务器保存 GitHub token。下载地址只允许 HTTPS 和 GitHub 产物 CDN 主机，保存在 root 私有文件中，下载完成或失败后删除。
 
@@ -118,4 +121,4 @@ CLI、CI 控制端、下载组件、安装器和测试全部在本仓库维护�
 
 dev Release 保留两架构平台更新包、摘要、cloudctl 和 dev.json，不再受 Actions 的三天附件保留期影响，暂无自动清理。正式完整离线包仍只在 main 发布；PR 额外构建离线包用于验收。下载、首次安装和升级命令见 [安装指南](install.md#统一-cloudctl-首次安装)。
 
-如果仓库之前通过 GitHub 的 Disable workflow 暂停了 dev 工作流，必须等这份代码合并后再恢复启用。先确保 `TEST_SERVER_AUTO_DEPLOY=false`，再 Enable workflow，并在 dev 手动 Run workflow 补发首包；只发布、不部署。此后每次 dev 推送自动发布。不能为了打包在旧版工作流上直接恢复自动部署。
+如果仓库之前通过 GitHub 的 Disable workflow 暂停了 dev 工作流，必须等这份代码合并后再恢复启用。先确保未设置 `TEST_SERVER_AUTO_DEPLOY`（或值为 false），再 Enable workflow，并在 dev 手动 Run workflow 补发首包；只发布、不部署。此后每次 dev 推送自动发布。不能为了打包在旧版工作流上直接恢复自动部署。
