@@ -41,9 +41,9 @@ apps/agent → 组装具体实现，输出 agentd / agentctl
 
 安装后 `cloudctl` 默认展示分类帮助，直接支持应用列表/部署/启停、诊断/应用日志、任务、密钥/卷和域名。这些操作都转发到同一个 agentctl/API，不经过 Go/Web，不直接写状态库。
 
-- `cloudctl apply` / `deploy` 默认等待持久化任务结果；`--no-wait` 才只提交。
-- `cloudctl logs --project P --name APP` 默认 100 行；`system-logs` 明确表示节点服务日志。旧 `logs agent|control|runtime|proxy` 保留兼容。
-- `agentctl` 自身保留全部操作与 `help`；`list/deploy/status` 是 apps/apply/doctor 的可见别名，没有第二套流程。
+- `cloudctl deploy` 默认等待持久化任务结果；`--no-wait` 才只提交。
+- `cloudctl logs --project P --name APP` 默认 100 行；`system-logs` 明确表示节点服务日志。`logs` 只用于应用，系统服务必须使用 `system-logs SERVICE`。
+- `agentctl` 自身保留全部操作与 `help`；只提供 `apps/apply/doctor` 等规范命令，不保留历史别名。
 - apply/validate/plan 支持 TOML 和普通 AppSpec JSON，共用同一个 AppSpec 校验和指纹。JSON 请求信封如 `http-service.apply.json` 仍只用于 Go HTTP 提交，不能当作普通配置导入。
 - 不隐式创建数据库、不自动部署模板、不默认开放端口或执行清理。不配置 project/name 的启停请求仍拒绝，避免操作错误应用。
 
@@ -59,7 +59,7 @@ apps/agent → 组装具体实现，输出 agentd / agentctl
 | 组件裁剪 | 协议-only、client-only、server-only，ingress 无 Caddy/有 Caddy 均通过；依赖树确认协议-only 无 Hyper/Tokio/SQLite/nerdctl |
 | 工具链与质量 | Clippy、fmt、Linux Rust 1.85 检查通过；外部依赖版本和摘要未变化 |
 | Go / Web | 无缓存 Go race/真实 Rust Socket 集成、vet、TS 8、浏览器 3、生产构建通过 |
-| 命令与安装组件 | 10 项安装组件测试；含参数完整转发、别名默认行为、未知命令失败、help 不触发自检 |
+| 命令与安装组件 | 10 项安装组件测试；含参数完整转发、规范命令默认行为与历史别名拒绝、未知命令失败、help 不触发自检 |
 | ShellCheck | 统一命令与安装/发布脚本静态检查通过 |
 | 2 CPU/2 GiB Ubuntu ARM64 | 全新安装、重复安装、数据库持久化、自检后重装通过 |
 | 0.4.1→0.5.0 | 对比令牌/密钥/卷元数据摘要与域名版本，HTTPS/SQL/Redis 数据保留 |

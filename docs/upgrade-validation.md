@@ -8,7 +8,7 @@
 | --- | --- |
 | Rust workspace | 76 项通过，1 项独立 Linux 运行时专项默认忽略 |
 | 维护门禁 | 慢部署排空、拒绝新任务/密钥/域名写入、读取保持可用、恢复接单通过 |
-| 启动与迁移 | start_drained 阻止启动恢复；新 CLI 仅迁移隔离副本；后续 SQL 步骤失败时整体事务回滚通过 |
+| 启动与迁移 | start_drained 阻止启动恢复；新 CLI 仅检查隔离副本；旧版与未知结构拒绝打开并保留原数据 |
 | Rust 组件裁剪与质量 | fmt、Clippy `-D warnings`、协议-only/client/server、ingress 无/有 Caddy 通过 |
 | Linux 与最低工具链 | Linux Rust 测试通过；Rust 1.85 workspace/all-targets 检查通过 |
 | Go | race、vet、真实 Go→Rust Socket；门禁跨资源/域名装饰层，Go HTTP 写入返回 503、读取仍可用 |

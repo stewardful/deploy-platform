@@ -4,13 +4,17 @@
 log() { printf '[cloud] %s\n' "$*"; }
 die() { printf '[cloud] ERROR: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "required command missing: $1"; }
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=os.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/os.sh"
 preflight_host() {
     [[ $(id -u) == 0 ]] || die 'run this installer with sudo'
     [[ $(uname -s) == Linux ]] || die 'Ubuntu Linux is required'
     # /etc/os-release is trusted system configuration, never bundle content.
     # shellcheck disable=SC1091
     . /etc/os-release
-    [[ $ID == ubuntu && $VERSION_ID == 24.04 ]] || die 'this release supports Ubuntu 24.04 LTS only'
+    check_supported_os || exit 1
+    HOST_VERSION=$VERSION_ID
     [[ -f /sys/fs/cgroup/cgroup.controllers ]] || die 'unified cgroup v2 is required'
     [[ -d /run/systemd/system ]] || die 'systemd must be PID 1 (a regular cloud VM)'
     systemctl show-environment >/dev/null || die 'cannot connect to systemd'

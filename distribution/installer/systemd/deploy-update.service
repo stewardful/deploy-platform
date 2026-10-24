@@ -1,5 +1,5 @@
 [Unit]
-Description=Deploy Platform explicit release upgrade
+Description=Deploy Platform explicit stable/dev platform upgrade
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/deploy-platform/current/lib/update_worker.py
+ExecStart=/usr/bin/python3 -I -B /opt/deploy-platform/current/lib/update_worker.py
 Environment=PYTHONDONTWRITEBYTECODE=1
 # Must outlive control/agent/proxy restarts; keep installer in its own cgroup.
 TimeoutStartSec=infinity

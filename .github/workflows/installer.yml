@@ -14,3 +14,64 @@ jobs:
     uses: ./.github/workflows/build-installers.yml
     with:
       arch: amd64
+      delivery: true
+  ubuntu-install:
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['24.04', '26.04']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          name: deploy-platform-linux-amd64
+          path: dist
+      - uses: actions/download-artifact@v7
+        with:
+          name: deploy-platform-offline-linux-amd64
+          path: offline
+      - name: Verify actual GitHub archive digest, size and extraction contract
+        if: matrix.ubuntu == '26.04'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_ARTIFACT_DIR: ${{ github.workspace }}/dist
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          CI_ARTIFACT_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: python3 distribution/tests/check-artifact.py
+      - name: Install and exercise real containers on an isolated 2CPU/2GiB node
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: bash distribution/tests/ubuntu-smoke.sh "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run
+      - name: Install the formal offline bundle without fetching runtime dependencies
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: bash distribution/tests/ubuntu-smoke.sh "$GITHUB_WORKSPACE"/offline/deploy-platform-*-linux-amd64.run
+      - name: Exercise real SSH control and HTTPS delivery faults
+        if: matrix.ubuntu == '26.04'
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: bash distribution/tests/ci-ssh-smoke.sh "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run
+      - uses: actions/setup-go@v6
+        if: matrix.ubuntu == '26.04'
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build a local frontend and backend fixture image
+        if: matrix.ubuntu == '26.04'
+        run: |
+          mkdir -p target/upgrade-fixture
+          (cd examples/fullstack/service && GOWORK=off CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$GITHUB_WORKSPACE/target/upgrade-fixture/fullstack-demo" .)
+          docker build -f distribution/tests/Dockerfile.fullstack -t cloud-fullstack-demo:upgrade-check target/upgrade-fixture
+          docker save cloud-fullstack-demo:upgrade-check -o target/upgrade-demo.tar
+      - name: Verify update data retention and failed-activation rollback
+        if: matrix.ubuntu == '26.04'
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: bash distribution/tests/upgrade-smoke.sh "$GITHUB_WORKSPACE"/offline/deploy-platform-*-linux-amd64.run "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run "$GITHUB_WORKSPACE"/target/upgrade-demo.tar

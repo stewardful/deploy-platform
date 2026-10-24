@@ -33,6 +33,9 @@ type Candidate struct {
 	Digest  string `json:"digest"`
 }
 type Execution struct {
+	Channel string `json:"channel,omitempty"`
+	RunID   string `json:"run_id,omitempty"`
+	Commit  string `json:"commit,omitempty"`
 	Version string `json:"version"`
 	Phase   string `json:"phase"`
 	Message string `json:"message"`
@@ -50,12 +53,12 @@ type Settings struct {
 	TokenFile  string `json:"token_file"`
 }
 type Service struct {
-	mu                         sync.Mutex
-	dir, current, arch, config string
-	client                     *http.Client
-	now                        func() time.Time
-	last                       time.Time
-	status                     Status
+	mu                                         sync.Mutex
+	dir, current, arch, config, currentChannel string
+	client                                     *http.Client
+	now                                        func() time.Time
+	last                                       time.Time
+	status                                     Status
 }
 
 func New(dir, manifest, config string) (*Service, error) {
@@ -66,6 +69,9 @@ func New(dir, manifest, config string) (*Service, error) {
 	var release struct {
 		Version string `json:"version"`
 		Arch    string `json:"arch"`
+		Build   struct {
+			Channel string `json:"channel"`
+		} `json:"build"`
 	}
 	if json.Unmarshal(data, &release) != nil || !stable.MatchString(release.Version) || release.Arch != runtime.GOARCH {
 		return nil, errors.New("invalid installed release manifest")
@@ -74,7 +80,7 @@ func New(dir, manifest, config string) (*Service, error) {
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("updates directory must be a private directory")
 	}
-	return &Service{dir: dir, current: release.Version, arch: release.Arch, config: config, now: time.Now, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, status: Status{Enabled: true, Current: release.Version}}, nil
+	return &Service{dir: dir, current: release.Version, currentChannel: release.Build.Channel, arch: release.Arch, config: config, now: time.Now, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, status: Status{Enabled: true, Current: release.Version}}, nil
 }
 
 func privateRead(path string, limit int64) ([]byte, error) {
@@ -159,7 +165,7 @@ func (s *Service) snapshot() Status {
 		if name == "active.json" {
 			result, err := privateRead(filepath.Join(s.dir, "result.json"), 4096)
 			var progress Execution
-			if err == nil && json.Unmarshal(result, &progress) == nil && progress.Version == e.Version {
+			if err == nil && json.Unmarshal(result, &progress) == nil && (progress.Version == e.Version || e.Channel == "dev") && progress.Channel == e.Channel && progress.RunID == e.RunID {
 				e = progress
 			}
 			lock, err := os.OpenFile(filepath.Join(s.dir, "worker.lock"), os.O_RDWR, 0600)
@@ -246,7 +252,7 @@ func (s *Service) discover(ctx context.Context) (*Candidate, error) {
 	if !stable.MatchString(version) {
 		return nil, ErrUnavailable
 	}
-	if !newer(version, s.current) {
+	if !newer(version, s.current) && !(version == s.current && s.currentChannel == "dev") {
 		return nil, nil
 	}
 	name := fmt.Sprintf("deploy-platform-%s-linux-%s.run", version, s.arch)
@@ -267,6 +273,15 @@ func (s *Service) discover(ctx context.Context) (*Candidate, error) {
 func (s *Service) Upgrade(version string) (Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := os.OpenFile(filepath.Join(s.dir, "submission.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return s.snapshot(), err
+	}
+	defer lock.Close()
+	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return s.snapshot(), ErrConflict
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	c := s.status.Candidate
 	if c == nil || version != c.Version || s.now().Sub(s.last) > time.Hour || s.status.Error != "" {
 		return s.snapshot(), ErrConflict

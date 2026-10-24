@@ -15,7 +15,7 @@
 
 维护门禁在 Rust `agent-api` 中实现，由 `agent-core`、`node-resources`、`ingress` 共享。许可跟随实际写入，包括不随 HTTP 超时取消的阻塞文件写入。排队任务、后台恢复和 API 写入都结束后才报告 quiescent。协议-only 使用不引入 Tokio。
 
-0.4.1/0.5.0 没有维护 API：安装器暂时把旧 Unix Socket 移到私有升级入口，禁止新连接，等待已建立请求及持久化任务排空，停止后再检查未完成操作。失败则恢复入口；停止前失败不重启旧 Agent。未知的旧版布局拒绝猜测升级。旧版本没有新版本的 worker 静默状态保证，因此停止后的二次检查不可省略。
+安装器只接受当前安装包格式、显式依赖锁与状态契约，升级要求 Agent 提供维护 API。不支持缺少这些能力的历史版本，不推断旧格式，也不移动 Unix Socket 模拟维护门禁。
 
 ## 配置业务探针
 
@@ -54,7 +54,7 @@ bash deploy-platform-0.5.1-linux-amd64.run --check
 sudo bash deploy-platform-0.5.1-linux-amd64.run --upgrade \
   --drain-seconds 300 --verify-seconds 120
 sudo cloudctl maintenance status
-sudo cloudctl verify
+sudo cloudctl status
 ```
 
 ARM64 使用 arm64 包。可通过 `--checks-file /绝对路径/配置.json` 指定私有配置，没有跳过业务验证的升级参数。
@@ -63,21 +63,21 @@ ARM64 使用 arm64 包。可通过 `--checks-file /绝对路径/配置.json` 指
 
 停止服务前失败：恢复旧入口并解除门禁，不取消已有任务。切换后失败：在数据库仍可被旧版本读取时恢复旧程序/配置并恢复原活动服务；恢复本身失败会保留事务记录，不能误报安装成功。若在线 schema 已不兼容，阻止旧程序启动，保留数据库与备份，需人工制定恢复方案；不会自动用旧数据库覆盖新数据。
 
-Agent SQLite 的所有迁移步骤、运行时目标校验和中断状态修复放在同一事务中，任一步失败全部回滚。发布兼容性清单在 [compatibility.json](../distribution/release/compatibility.json)，打包时嵌入 manifest，不能只凭版本号断言安全。
+Agent SQLite 直接初始化当前结构，运行时目标校验和中断状态修复放在同一事务中，任一步失败全部回滚。历史 v1/v2 结构拒绝打开，不执行逐级迁移。发布兼容性清单在 [compatibility.json](../distribution/release/compatibility.json)，打包时嵌入 manifest，不能只凭版本号断言安全。
 
 卷目录与元数据保持不变，只读业务探针验证选定的数据；**它们不能证明整个业务数据库逐字节一致，也不构成业务备份**。仍需独立验证 PostgreSQL/Redis、应用文件及证书存储的备份恢复。
 
 ## 测试入口
 
-`make test` 包含维护排空/拒绝写入/恢复、真实 Go→Rust 门禁、迁移失败原子性，以及 Python 兼容性、磁盘、超时、旧版排空、TLS、探针和回滚故障注入测试。
+`make test` 包含维护排空/拒绝写入/恢复、真实 Go→Rust 门禁、历史结构拒绝且数据保留，以及 Python 状态契约、磁盘、超时、维护 API 失败、TLS、探针和回滚故障注入测试。
 
 真实 Linux/containerd 验收在可删除隔离节点运行：
 
 ```bash
 bash distribution/tests/upgrade-smoke.sh \
-  /绝对路径/deploy-platform-0.5.0-linux-arm64.run \
-  /绝对路径/deploy-platform-0.5.1-linux-arm64.run \
+  /绝对路径/deploy-platform-0.5.3-linux-arm64.run \
+  /绝对路径/deploy-platform-0.5.3-linux-arm64.run \
   /绝对路径/upgrade-demo.tar
 ```
 
-测试镜像归档必须包含对应架构的 `cloud-fullstack-demo:upgrade-check`，使用当前四服务示例构建。脚本限制节点为 2 CPU/2 GiB，验证旧版升级、本地 CA 的真实 HTTPS、已有数据库/缓存记录、验证失败后的恢复和新版维护 API 重装。CA 只在该可删除节点内受信，不修改开发机信任库。
+测试镜像归档必须包含对应架构的 `cloud-fullstack-demo:upgrade-check`，使用当前四服务示例构建。脚本限制节点为 2 CPU/2 GiB，验证当前格式的升级、本地 CA 的真实 HTTPS、已有数据库/缓存记录、验证失败后的恢复和新版维护 API 重装。CA 只在该可删除节点内受信，不修改开发机信任库。

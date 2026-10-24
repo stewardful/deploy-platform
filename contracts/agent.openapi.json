@@ -1022,7 +1022,7 @@
           "resources"
         ],
         "additionalProperties": false,
-        "description": "Immutable application configuration. Optional mounts/user preserve legacy fingerprints when absent. No host paths or secret bytes accepted; ordinary environment and args are not secret-safe.",
+        "description": "Immutable application configuration. Optional mounts/user are omitted when unset. No host paths or secret bytes accepted; ordinary environment and args are not secret-safe.",
         "allOf": [
           {
             "if": {

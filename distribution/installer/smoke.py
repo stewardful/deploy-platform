@@ -81,6 +81,24 @@ def wait_job(job):
     return job
 
 
+def verify_kernel_limits(instance):
+    inspected = json.loads(runtime("inspect", "--", instance))[0]
+    pid = inspected['State']['Pid']
+    if type(pid) is not int or pid <= 0: raise RuntimeError('test container has no live PID')
+    lines = Path('/proc/'+str(pid)+'/cgroup').read_text().splitlines()
+    paths = [line[3:] for line in lines if line.startswith('0::')]
+    if len(paths) != 1 or not paths[0].startswith('/') or '..' in Path(paths[0]).parts:
+        raise RuntimeError('test container has no safe cgroup v2 path')
+    group = Path('/sys/fs/cgroup') / paths[0].lstrip('/')
+    memory = (group/'memory.max').read_text().strip()
+    pids = (group/'pids.max').read_text().strip()
+    cpu = (group/'cpu.max').read_text().split()
+    if (memory != str(128*1024**2) or pids != '64' or len(cpu) != 2
+            or not all(value.isdigit() for value in cpu) or int(cpu[1]) <= 0
+            or int(cpu[0])/int(cpu[1]) != 0.25):
+        raise RuntimeError('kernel memory/CPU/PID limits did not match')
+
+
 def project():
     health(15)
     key = "smoke-" + secrets.token_hex(5)
@@ -117,10 +135,12 @@ def project():
         if (host.get("Memory") != 128 * 1024**2 or host.get("PidsLimit") != 64
                 or host.get("CpuQuota", 0) / max(host.get("CpuPeriod", 0), 1) != 0.25):
             raise RuntimeError("memory/CPU/PID limits did not match")
+        verify_kernel_limits(instance)
         runtime("stop", "--", instance)
         subprocess.run(["systemctl", "restart", "deploy-agent"], check=True)
         wait_ready(30)
         http_ready()
+        verify_kernel_limits(instance)
         print("PASS: real image pull, CNI loopback HTTP, resource limits, idempotency and Agent restart recovery")
     finally:
         # Persist stop intent before cleaning this test's owned container. Never prune.

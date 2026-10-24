@@ -1,6 +1,4 @@
-use agent_core::{
-    ApplyError, ApplyOptions, DeploymentStore, DesiredState, Phase, StoreError, apply,
-};
+use agent_core::{ApplyError, ApplyOptions, DeploymentStore, Phase, StoreError, apply};
 use agent_store_sqlite::{DaemonLease, SqliteStore};
 use app_model::{AppKey, AppSpec, Environment, Identifier, ImageRef, NetworkMode, Resources};
 use async_trait::async_trait;
@@ -359,45 +357,4 @@ fn daemon_lease_excludes_second_daemon_but_not_short_lived_cli_store() {
     drop(store);
     drop(lease);
     assert!(DaemonLease::acquire(dir.path()).is_ok());
-}
-
-#[test]
-fn version_one_database_migrates_without_losing_configuration_or_history() {
-    let dir = private_directory();
-    let spec = spec();
-    {
-        let connection = rusqlite::Connection::open(dir.path().join("agent.sqlite")).unwrap();
-        connection
-            .execute_batch(include_str!("../migrations/001_initial.sql"))
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO metadata(key,value) VALUES('runtime_target','target')",
-                [],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO applications(name,spec,fingerprint,phase) VALUES(?1,?2,?3,?4)",
-                rusqlite::params![
-                    spec.app.instance_name(),
-                    serde_json::to_string(&spec).unwrap(),
-                    spec.fingerprint().unwrap(),
-                    "\"succeeded\""
-                ],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO operations(name,phase) VALUES(?1,?2)",
-                rusqlite::params![spec.app.instance_name(), "\"succeeded\""],
-            )
-            .unwrap();
-    }
-    let store = SqliteStore::open(dir.path(), "target").unwrap();
-    let app = &store.applications().unwrap()[0];
-    assert_eq!(app.desired, DesiredState::Running);
-    assert_eq!(app.recovery.attempts, 0);
-    assert_eq!(app.fingerprint, spec.fingerprint().unwrap());
-    assert_eq!(store.operations(20).unwrap().len(), 1);
 }

@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agent-api"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "app-model",
  "async-trait",
@@ -24,7 +24,7 @@ dependencies = [
 
 [[package]]
 name = "agent-core"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "agent-api",
  "app-model",
@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "agent-store-sqlite"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "agent-api",
  "agent-core",
@@ -106,7 +106,7 @@ dependencies = [
 
 [[package]]
 name = "app-model"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "ingress"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "agent-api",
  "app-model",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "ingress-model"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "app-model",
  "async-trait",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "node-agent"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "agent-api",
  "agent-core",
@@ -612,7 +612,7 @@ dependencies = [
 
 [[package]]
 name = "node-resources"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "agent-api",
  "app-model",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "runtime-api"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "app-model",
  "async-trait",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "runtime-nerdctl"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "app-model",
  "async-trait",

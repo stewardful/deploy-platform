@@ -52,13 +52,17 @@ class ArchiveTests(unittest.TestCase):
             required = ["bin/agentd", "bin/agentctl", "bin/controld", "web/index.html"]
             required += ["runtime/bin/" + n for n in ("containerd", "containerd-shim-runc-v2", "ctr", "nerdctl", "runc")]
             required += ["runtime/libexec/cni/" + n for n in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning")]
+            required += list(archive.CURRENT_CLI_FILES)
+            required += ['proxy/bin/caddy', 'proxy/LICENSE', 'proxy/proxy.lock.json', 'systemd/deploy-proxy.service',
+                         'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py',
+                         'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path']
             for name in required:
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"fixture")
-            value = {"schema_version": 1, "version": "0.1.0", "arch": "arm64", "files": {n: archive.digest(root / n) for n in required}}
+            value = {"schema_version": 1, "version": "0.5.3", "arch": "arm64", "package_kind": "offline", "runtime": {}, "proxy": {}, "compatibility": json.loads((ROOT/'distribution/release/compatibility.json').read_text()), "files": {n: archive.digest(root / n) for n in required}}
             (root / "manifest.json").write_text(json.dumps(value))
-            self.assertEqual(archive.verify(root, "arm64")["version"], "0.1.0")
+            self.assertEqual(archive.verify(root, "arm64")["version"], "0.5.3")
             with self.assertRaises(ValueError): archive.verify(root, "amd64")
             (root / "bin/agentctl").write_bytes(b"tampered")
             with self.assertRaisesRegex(ValueError, "checksum"): archive.verify(root)
@@ -147,34 +151,25 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    def test_node_entry_preserves_arguments_and_never_swallows_unknown_commands(self):
+    def test_installed_wrapper_uses_immutable_release_cli_without_environment_overrides(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / 'bin').mkdir()
-            agent = root / 'bin/agentctl'
-            agent.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$@"\n')
-            agent.chmod(0o755)
-            wrapper = root / 'cloudctl'
-            source = (ROOT / 'distribution/installer/cloudctl').read_text()
-            wrapper.write_text(source.replace('ROOT=/opt/deploy-platform/current', 'ROOT=' + shlex.quote(str(root))))
-            commands = [
-                ['apps'], ['deploy', '-f', 'file with spaces.json'],
-                ['start', '--project', 'demo', '--name', 'web'],
-                ['logs', '--project', 'demo', '--name', 'web', '--tail', '20'],
-                ['agentctl', 'routes'], ['help', 'deploy'],
-            ]
-            for args in commands:
-                with self.subTest(args=args):
-                    result = subprocess.run(['bash', str(wrapper), *args], check=True, text=True, capture_output=True)
-                    forwarded = args[1:] if args[0] == 'agentctl' else args
-                    self.assertEqual(result.stdout.splitlines(), ['--socket', '/run/deploy-platform/agent.sock', *forwarded])
-            for args in [[], ['help'], ['help', 'status'], ['stateful-smoke', '--help'], ['system-logs', '--help']]:
-                result = subprocess.run(['bash', str(wrapper), *args], check=True, text=True, capture_output=True)
-                self.assertIn('Applications', result.stdout)
-                self.assertIn('system-logs', result.stdout)
-            for args in [['unknown-command'], ['system-logs', 'unexpected.service'], ['smoke', '--unexpected']]:
-                result = subprocess.run(['bash', str(wrapper), *args], text=True, capture_output=True)
-                self.assertEqual(result.returncode, 2)
+            shutil.copytree(ROOT/'distribution/installer/lib', root/'lib', ignore=shutil.ignore_patterns('__pycache__'))
+            shutil.copyfile(ROOT/'distribution/installer/fullstack_smoke.py', root/'fullstack_smoke.py')
+            shutil.copyfile(ROOT/'distribution/installer/smoke.py', root/'smoke.py')
+            shutil.copytree(ROOT/'examples/fullstack', root/'examples/fullstack')
+            wrapper = root/'cloudctl'
+            source = (ROOT/'distribution/installer/cloudctl').read_text()
+            wrapper.write_text(source.replace('ROOT=/opt/deploy-platform/current', 'ROOT='+shlex.quote(str(root))))
+            result = subprocess.run(['bash', str(wrapper), '--help'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Applications', result.stdout)
+            self.assertIn('upgrade-dev', result.stdout)
+            result = subprocess.run(['bash', str(wrapper), 'test', 'fullstack', '--help'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('--image', result.stdout)
+            result = subprocess.run(['bash', str(wrapper), 'version', 'ignored'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
 
 
 class TransactionTests(unittest.TestCase):

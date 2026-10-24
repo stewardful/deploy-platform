@@ -40,7 +40,7 @@ def main():
     sys.path.insert(0, '/opt/deploy-platform/current')
     from smoke import request, runtime, wait_ready
     runtime('load', '-i', '/var/tmp/demo.tar')
-    system('cloudctl', 'fullstack-smoke', '--image', 'cloud-fullstack-demo:upgrade-check', '--pull-policy', 'never', '--keep-running')
+    system('cloudctl', 'test', 'fullstack', '--image', 'cloud-fullstack-demo:upgrade-check', '--pull-policy', 'never', '--keep-running')
     apps = request('/api/v1/apps')
     project = next(a['app']['project'] for a in apps if a['app']['name'] == 'frontend' and a['desired'] == 'running')
     if not re.fullmatch(r'stack-[0-9a-f]+', project): raise RuntimeError('unexpected test project')

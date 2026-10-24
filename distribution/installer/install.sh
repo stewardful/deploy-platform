@@ -25,6 +25,19 @@ source "$SOURCE/lib/host.sh"
 preflight_host
 exec 9>/run/lock/deploy-platform-install.lock
 flock -n 9 || die 'another installer is running'
+# Validate the update and host before fetching dependencies. Assembly runs under
+# the installer lock, before maintenance, backup or service changes.
+python3 "$SOURCE/lib/archive.py" verify "$SOURCE" --arch "$HOST_ARCH" >/dev/null
+install_dependencies
+timeout --kill-after=5 960 python3 - "$SOURCE" "$HOST_ARCH" <<'PYASSEMBLE'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1])/'lib'))
+import archive
+archive.verify(Path(sys.argv[1]), sys.argv[2])
+import dependencies
+dependencies.materialize(Path(sys.argv[1]))
+PYASSEMBLE
 VERSION=$(python3 "$SOURCE/lib/archive.py" verify "$SOURCE" --arch "$HOST_ARCH")
 python3 "$SOURCE/lib/state.py" recover --source "$SOURCE"
 python3 "$SOURCE/lib/state.py" check
@@ -32,7 +45,15 @@ if [[ ! -f /etc/deploy-platform/install.json && -f /var/lib/deploy-platform/agen
     die 'unmanaged Agent database found; use a planned migration, not fresh installation'
 fi
 if [[ -e /usr/local/bin/cloudctl || -L /usr/local/bin/cloudctl ]]; then
-    [[ -L /usr/local/bin/cloudctl && $(readlink /usr/local/bin/cloudctl) == /opt/deploy-platform/current/cloudctl ]] || die 'unmanaged cloudctl exists'
+    if [[ ! -L /usr/local/bin/cloudctl || $(readlink /usr/local/bin/cloudctl) != /opt/deploy-platform/current/cloudctl ]]; then
+        python3 - "$SOURCE" <<'PYCLI'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1])/'lib'))
+from first_install import assert_bootstrap_launcher
+assert_bootstrap_launcher()
+PYCLI
+    fi
 fi
 if [[ -e /opt/deploy-platform/current || -L /opt/deploy-platform/current ]]; then
     [[ -f /etc/deploy-platform/install.json && -L /opt/deploy-platform/current && $(readlink /opt/deploy-platform/current) == /opt/deploy-platform/releases/* ]] || die 'unmanaged current release path'
@@ -53,12 +74,11 @@ PY
 fi
 if ip link show cloud0 >/dev/null 2>&1 && [[ ! -f /etc/deploy-platform/install.json ]]; then die 'unmanaged cloud0 bridge exists'; fi
 python3 "$SOURCE/lib/upgrade.py" preflight --source "$SOURCE" --checks-file "$CHECKS_FILE"
-install_dependencies
 WORK=$(mktemp -d /var/tmp/cloud-install.XXXXXXXX)
 trap 'rm -rf -- "$WORK"' EXIT
 args=(); [[ -z $CIDR ]] || args=(--requested "$CIDR")
 CIDR=$(ip -j -4 route show table all | python3 "$SOURCE/lib/network.py" "${args[@]}")
-log "Ubuntu 24.04 / $HOST_ARCH; dedicated bridge $CIDR; installing prebuilt release $VERSION"
+log "Ubuntu $HOST_VERSION / $HOST_ARCH; dedicated bridge $CIDR; installing prebuilt release $VERSION"
 # shellcheck source=lib/activate.sh
 source "$SOURCE/lib/activate.sh"
 activate

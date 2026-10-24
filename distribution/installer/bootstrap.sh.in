@@ -2,6 +2,7 @@
 # Self-contained installer. Verify the .sha256 file from a trusted source before running.
 set -Eeuo pipefail
 umask 077
+@OS_POLICY@
 export PYTHONDONTWRITEBYTECODE=1
 if [[ ${1:-} == --help ]]; then
     printf '%s\n' 'Usage: sudo bash deploy-platform-VERSION-linux-ARCH.run [--skip-apt] [--upgrade] [--bridge-cidr CIDR] [--smoke-test] [--drain-seconds 300] [--verify-seconds 120] [--checks-file /ABS/PATH]' '       bash deploy-platform-VERSION-linux-ARCH.run --check' 'No application builds run on the target node. --check only verifies the payload.'
@@ -17,9 +18,7 @@ if command -v sha256sum >/dev/null; then actual=$(sha256sum "$work/payload.tar.g
 if ! command -v python3 >/dev/null; then
     [[ ${1:-} != --check && $(id -u) == 0 && $(uname -s) == Linux ]] || { echo 'python3 is needed to verify/extract the payload' >&2; exit 1; }
     for option in "$@"; do [[ $option != --skip-apt ]] || { echo "--skip-apt requires python3 already installed" >&2; exit 1; }; done
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    [[ $ID == ubuntu && $VERSION_ID == 24.04 ]] || { echo 'Ubuntu 24.04 is required' >&2; exit 1; }
+    check_supported_os || exit 1
     DEBIAN_FRONTEND=noninteractive apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3
 fi

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -155,5 +156,62 @@ func TestConcurrentApprovalQueuesExactlyOnce(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("accepted %d concurrent upgrades", count)
+	}
+}
+
+func TestCLIAndWebShareSubmissionLock(t *testing.T) {
+	s := fixture(t)
+	s.status.Candidate = &Candidate{Version: "0.5.2"}
+	s.last = s.now()
+	lock, err := os.OpenFile(filepath.Join(s.dir, "submission.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Upgrade("0.5.2"); err != ErrConflict {
+		t.Fatalf("concurrent CLI approval accepted: %v", err)
+	}
+	_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if _, err := s.Upgrade("0.5.2"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDevBuildCanReturnToSameVersionStableRelease(t *testing.T) {
+	for _, channel := range []string{"dev", "stable"} {
+		s := fixture(t)
+		s.current = "0.5.2"
+		s.currentChannel = channel
+		s.client.Transport = transport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(release(runtime.GOARCH)))}, nil
+		})
+		status, err := s.Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (status.Candidate != nil) != (channel == "dev") {
+			t.Fatalf("wrong promotion candidate for %s: %+v", channel, status)
+		}
+	}
+}
+
+func TestDevProgressKeepsChannelAndRunIdentity(t *testing.T) {
+	s := fixture(t)
+	_ = os.WriteFile(filepath.Join(s.dir, "active.json"), []byte(`{"channel":"dev","run_id":"42","commit":"abc","phase":"queued"}`), 0600)
+	_ = os.WriteFile(filepath.Join(s.dir, "result.json"), []byte(`{"channel":"dev","run_id":"42","commit":"abc","version":"0.5.3","phase":"installing"}`), 0600)
+	lock, err := os.OpenFile(filepath.Join(s.dir, "worker.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if value := s.Status().Execution; value.Phase != "installing" || value.Channel != "dev" || value.RunID != "42" {
+		t.Fatalf("lost dev execution identity: %+v", value)
 	}
 }

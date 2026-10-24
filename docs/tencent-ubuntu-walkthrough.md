@@ -41,7 +41,7 @@ scp deploy-platform-0.5.0-linux-amd64.run deploy-platform-0.5.0-linux-amd64.sha2
 sha256sum --check --ignore-missing deploy-platform-0.5.0-linux-amd64.sha256
 bash deploy-platform-0.5.0-linux-amd64.run --check
 sudo bash deploy-platform-0.5.0-linux-amd64.run
-sudo cloudctl verify
+sudo cloudctl status
 sudo systemctl is-active deploy-containerd deploy-agent deploy-control deploy-proxy
 sudo cloudctl token
 ```
@@ -56,7 +56,7 @@ ssh -N -L 8088:127.0.0.1:8088 USER@SERVER_IP
 
 浏览器打开 `http://127.0.0.1:8088/`，输入 token。这里管理的是服务器。业务 HTTPS 配置完成后，管理页面仍通过隧道访问。
 
-可先在服务器执行 `sudo cloudctl smoke`。它会真实部署普通应用、重启 Agent 并验证恢复，最后停止自己的测试应用；应在测试节点执行。
+可先在服务器执行 `sudo cloudctl test smoke`。它会真实部署普通应用、重启 Agent 并验证恢复，最后停止自己的测试应用；应在测试节点执行。
 
 ## 3. 在电脑或 CI 准备示例镜像和 JSON
 
@@ -168,7 +168,7 @@ curl --noproxy '*' https://api.YOUR_DOMAIN/api/visits
 不想先手工配置时，可在专用测试节点运行：
 
 ```bash
-sudo cloudctl fullstack-smoke \
+sudo cloudctl test fullstack \
   --image docker.io/library/cloud-fullstack-demo:0.4-acceptance \
   --pull-policy never --keep-running
 ```
@@ -178,13 +178,13 @@ sudo cloudctl fullstack-smoke \
 ## 8. 常见失败与记录
 
 ```bash
-sudo cloudctl verify
-sudo cloudctl logs agent
-sudo cloudctl logs control
-sudo cloudctl logs proxy
+sudo cloudctl status
+sudo cloudctl system-logs agent
+sudo cloudctl system-logs control
+sudo cloudctl system-logs proxy
 sudo cloudctl diagnostics --project acceptance --name backend
 sudo cloudctl logs --project acceptance --name backend --tail 50
-sudo cloudctl routes
+sudo cloudctl route list
 free -h
 df -h
 ```

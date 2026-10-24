@@ -14,6 +14,33 @@ import tarfile
 
 MAX_BYTES = 2 * 1024**3
 MAX_FILES = 5000
+CURRENT_CLI_FILES = {'lib/node_cli.py', 'lib/first_install.py', 'lib/ci_control.py', 'lib/ci_worker.py', 'lib/ci_state.py', 'lib/delivery.py'}
+
+
+def require_current(manifest):
+    if not isinstance(manifest, dict) or not isinstance(manifest.get('files'), dict) or not CURRENT_CLI_FILES.issubset(manifest['files']):
+        raise ValueError('installer lacks the current cloudctl components; rebuild from current source')
+    contract(manifest)
+
+
+class UpgradeError(ValueError):
+    """Safe operator-facing message; never include response bodies or credentials."""
+
+
+def contract(manifest):
+    value = manifest.get('compatibility')
+    if not isinstance(value, dict):
+        raise UpgradeError('release is missing a valid compatibility contract')
+    if value.get('schema_version') != 1 or value.get('agent_api') != 'v1' or value.get('paths_revision') != 1:
+        raise UpgradeError('unsupported compatibility contract')
+    if not isinstance(value.get('state'), dict) or set(value['state']) != {'agent', 'ingress'}:
+        raise UpgradeError('incomplete state compatibility contract')
+    for rule in value['state'].values():
+        if not isinstance(rule, dict) or set(rule) != {'read_min', 'read_max', 'write'} or any(type(n) is not int for n in rule.values()):
+            raise UpgradeError('invalid schema contract')
+        if not 0 <= rule['read_min'] <= rule['write'] <= rule['read_max']:
+            raise UpgradeError('invalid schema range')
+    return value
 
 
 def digest(path):
@@ -57,6 +84,32 @@ def extract(archive, destination):
             path.chmod(0o755 if member.mode & 0o111 else 0o644)
 
 
+def installer_manifest(path):
+    """Inspect a checksum-verified .run without executing it or extracting files."""
+    with Path(path).open('rb') as source:
+        consumed = 0
+        while True:
+            line = source.readline(1024 * 1024 + 1)
+            consumed += len(line)
+            if not line or consumed > 1024 * 1024:
+                raise ValueError('installer header missing or oversized')
+            if line == b'__CLOUD_ARCHIVE__\n': break
+        result, count, size = None, 0, 0
+        with tarfile.open(fileobj=source, mode='r|gz') as payload:
+            for member in payload:
+                count += 1
+                size += member.size
+                if count > MAX_FILES or size > MAX_BYTES:
+                    raise ValueError('installer archive exceeds limits')
+                if member.name == 'manifest.json':
+                    if result is not None or not member.isfile() or member.size > 2 * 1024**2:
+                        raise ValueError('invalid installer manifest')
+                    result = json.loads(payload.extractfile(member).read())
+        if result is None: raise ValueError('installer manifest missing')
+        require_current(result)
+        return result
+
+
 def verify(directory, expected_arch=None):
     root = Path(directory)
     manifest = json.loads((root / "manifest.json").read_text())
@@ -79,17 +132,33 @@ def verify(directory, expected_arch=None):
     if actual != set(hashes):
         raise ValueError("release inventory mismatch")
     required = {"bin/agentd", "bin/agentctl", "bin/controld", "web/index.html", "runtime/bin/containerd", "runtime/bin/containerd-shim-runc-v2", "runtime/bin/runc", "runtime/bin/nerdctl", "runtime/bin/ctr"}
-    # Historical 0.1-0.3 bundles remain verifiable for installer rollback.
-    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,4,0):
-        required.update({'proxy/bin/caddy','proxy/LICENSE','proxy/proxy.lock.json','systemd/deploy-proxy.service'})
-    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,5,1):
-        required.update({'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py'})
-        policy = manifest.get('compatibility')
-        if not isinstance(policy, dict) or policy.get('schema_version') != 1 or not isinstance(policy.get('state'), dict):
-            raise ValueError('release missing upgrade compatibility contract')
-    if tuple(map(int,manifest['version'].split('-')[0].split('.'))) >= (0,5,2):
-        required.update({'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path'})
+    required.update({'proxy/bin/caddy', 'proxy/LICENSE', 'proxy/proxy.lock.json', 'systemd/deploy-proxy.service',
+                     'lib/upgrade.py', 'lib/upgrade_state.py', 'lib/upgrade_probes.py', 'lib/agent_http.py',
+                     'lib/update_worker.py', 'systemd/deploy-update.service', 'systemd/deploy-update.path'})
+    require_current(manifest)
+    if not all(isinstance(manifest.get(key), dict) for key in ('runtime', 'proxy')):
+        raise ValueError('release missing dependency locks')
     required.update("runtime/libexec/cni/" + name for name in ("bridge", "loopback", "host-local", "portmap", "firewall", "tuning"))
+    kind = manifest.get('package_kind')
+    if kind not in ('offline', 'platform-update'):
+        raise ValueError('unsupported package kind')
+    if kind == 'platform-update':
+        if any(name.startswith(('runtime/', 'proxy/')) for name in actual):
+            raise ValueError('platform update must not embed dependency files')
+        required = {name for name in required if not name.startswith(('runtime/', 'proxy/'))}
+        required.update({'lib/dependencies.py', 'runtime.lock.json'})
+        for key in ('runtime', 'proxy'):
+            lock = manifest.get(key)
+            if not isinstance(lock, dict) or not isinstance(lock.get('archives'), dict):
+                raise ValueError('missing dependency lock')
+            expected = lock['archives'].get(manifest['arch'])
+            if key == 'proxy' and isinstance(expected, dict): expected = expected.get('sha256')
+            if not isinstance(expected, str) or not re.fullmatch('[a-f0-9]{64}', expected):
+                raise ValueError('invalid dependency digest')
+            if '{arch}' not in lock.get('archive_url_template', ''):
+                raise ValueError('invalid dependency URL template')
+        if json.loads((root/'runtime.lock.json').read_text()) != manifest['runtime']:
+            raise ValueError('runtime lock differs from manifest')
     if not required.issubset(actual):
         raise ValueError("release is missing application or runtime components")
     for name, expected in hashes.items():

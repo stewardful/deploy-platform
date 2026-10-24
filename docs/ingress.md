@@ -74,11 +74,11 @@ Caddy 重启以只含私有管理接口的 bootstrap 启动，不恢复可能过
 ```
 
 ```sh
-sudo cloudctl route-set --file route.json --expected-revision 0
-sudo cloudctl routes
+sudo cloudctl route set --file route.json --expected-revision 0
+sudo cloudctl route list
 # 编辑用查询得到的该绑定 revision，首次创建使用 0。
-sudo cloudctl route-delete --domain app.your-domain.com --expected-revision 1
-sudo cloudctl logs proxy
+sudo cloudctl route delete --domain app.your-domain.com --expected-revision 1
+sudo cloudctl system-logs proxy
 ```
 
 | 操作 | Agent Unix Socket | Go 管理 API |
@@ -92,7 +92,7 @@ sudo cloudctl logs proxy
 
 ## 排查
 
-- **代理同步失败**：检查 `cloudctl logs proxy`、`systemctl status deploy-proxy`、80/443 占用，以及安装目录权限。不要把整个状态目录改成 755。
+- **代理同步失败**：检查 `cloudctl system-logs proxy`、`systemctl status deploy-proxy`、80/443 占用，以及安装目录权限。不要把整个状态目录改成 755。
 - **证书未就绪**：核对 A/AAAA、CNAME 链、安全组、主机防火墙、出站 DNS/HTTPS、系统时间与 CA 错误/限额；先用 staging 排查。管理 API 的“代理已同步”不代表签发完成。
 - **证书存在但不信任**：检查是否选了 staging、客户端系统根证书是否正常、代理是否仍提供旧证书。平台不通过关闭浏览器证书校验解决此问题。
 - **HTTPS 502/503**：检查应用正在运行、端口正确、服务监听 0.0.0.0、项目网络和应用日志。`上游运行`仅表示已解析到归属正确的运行实例，不代表业务健康；HTTP 健康状态仍在应用诊断面板查看。

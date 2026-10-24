@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 const token = process.env.WEB_TEST_TOKEN;
 test.skip(!token, 'Run with the isolated Go + Rust test fixture and WEB_TEST_TOKEN');
 test('browser manages applications, retains task IDs and replays an uncertain submission', async ({
@@ -53,6 +54,7 @@ test('browser manages applications, retains task IDs and replays an uncertain su
   // Agent accepts start, but the browser loses its response. Retry must reuse the key.
   let requestID = '';
   let acceptedID = 0;
+  let responseLost = false;
   await page.route(
     '**/api/v1/apps/demo/web/start',
     async (route) => {
@@ -60,11 +62,16 @@ test('browser manages applications, retains task IDs and replays an uncertain su
       const response = await route.fetch();
       acceptedID = (await response.json()).id;
       await route.abort('connectionfailed');
+      responseLost = true;
     },
     { times: 1 },
   );
   await row.getByRole('button', { name: '启动', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: '启动应用', exact: true }).click();
+  // The pending banner exists before sending; wait for this deliberate network
+  // failure to finish before reload, so the captured accepted ID is authoritative.
+  await expect.poll(() => responseLost).toBe(true);
+  expect(acceptedID).toBeGreaterThan(0);
   await expect(page.getByText('有一笔提交尚未确认', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '部署应用', exact: true })).toBeDisabled();
   await page.reload();
@@ -151,6 +158,44 @@ test('write-only secrets and PostgreSQL template keep values out of browser stor
 });
 
 test('domain bindings are durable, editable and removable from the Web', async ({ page }) => {
+  // This case owns its fixture; it must also pass alone or under repeated execution.
+  const headers = { Authorization: `Bearer ${token!}` };
+  const deployed = await page.request.post('/api/v1/apps/apply', {
+    headers,
+    data: {
+      request_id: randomUUID(),
+      spec: {
+        schema_version: 1,
+        app: { project: 'domain-e2e', name: 'web' },
+        image: 'docker.io/library/nginx:stable-alpine',
+        resources: { memory_mib: 128, cpu_millis: 500, pids: 64 },
+        network: 'project',
+      },
+    },
+  });
+  expect(deployed.status()).toBe(202);
+  const job = await deployed.json();
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/v1/jobs/${job.id}`, { headers });
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).state;
+    })
+    .toBe('succeeded');
+  // Deliberately hold the first apps response: opening the panel need not mean
+  // the asynchronous app list has loaded or supplied the form's initial value.
+  let releaseApps!: () => void;
+  const appsReady = new Promise<void>((resolve) => {
+    releaseApps = resolve;
+  });
+  await page.route(
+    '**/api/v1/apps',
+    async (route) => {
+      await appsReady;
+      await route.continue();
+    },
+    { times: 1 },
+  );
   await page.goto('/');
   await page.getByRole('textbox', { name: '管理令牌' }).fill(token!);
   await page.getByRole('button', { name: '进入工作台' }).click();
@@ -158,8 +203,17 @@ test('domain bindings are durable, editable and removable from the Web', async (
   await expect(page.getByRole('heading', { name: '域名与 HTTPS', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '绑定域名', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '域名绑定', exact: true });
+  await expect(dialog).toBeVisible();
+  releaseApps();
+  await expect(dialog).not.toHaveClass(
+    /(?:^|\s)t-dialog-zoom-(?:enter|appear)(?:-active)?(?:\s|$)/,
+  );
   await dialog.getByLabel('公网域名', { exact: true }).fill('web.example.com');
-  // First fixture application is demo/web and is on a project network.
+  await dialog.getByRole('textbox', { name: '目标应用', exact: true }).click();
+  await page.getByText('domain-e2e / web', { exact: true }).click();
+  await expect(dialog.getByRole('textbox', { name: '目标应用', exact: true })).toHaveValue(
+    'domain-e2e / web',
+  );
   await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   const card = page.locator('.domain-card').filter({ hasText: 'web.example.com' });

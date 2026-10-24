@@ -12,7 +12,7 @@
 bash deploy-platform-0.5.0-linux-amd64.run --check
 sha256sum --check --ignore-missing deploy-platform-0.5.0-linux-amd64.sha256
 sudo bash deploy-platform-0.5.0-linux-amd64.run
-sudo cloudctl verify
+sudo cloudctl status
 sudo systemctl is-active deploy-containerd deploy-agent deploy-control deploy-proxy
 curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8088/api/v1/apps
 ```
@@ -25,9 +25,9 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8088/api
 
 | 命令 | 验证内容 | 通过标准与副作用 |
 |---|---|---|
-| `sudo cloudctl smoke` | 普通 Web 应用、HTTP、资源限制、请求幂等、Agent 恢复 | 输出 PASS；最后停止自己的测试应用；保留停止元数据及镜像缓存 |
-| `sudo cloudctl stateful-smoke` | PostgreSQL/Redis 认证读写、容器重建后数据保留、停止意图 | 两种数据库均输出 PASS；会重启 Agent；最后停止测试应用，保留卷和密钥 |
-| `sudo cloudctl fullstack-smoke --image YOUR_IMAGE --keep-running` | 前端→后端→PostgreSQL/Redis、故障诊断、项目隔离、重建恢复 | 全部 PASS；保留运行中的四服务项目，用于后续网页和 HTTPS 验收 |
+| `sudo cloudctl test smoke` | 普通 Web 应用、HTTP、资源限制、请求幂等、Agent 恢复 | 输出 PASS；最后停止自己的测试应用；保留停止元数据及镜像缓存 |
+| `sudo cloudctl test stateful` | PostgreSQL/Redis 认证读写、容器重建后数据保留、停止意图 | 两种数据库均输出 PASS；会重启 Agent；最后停止测试应用，保留卷和密钥 |
+| `sudo cloudctl test fullstack --image YOUR_IMAGE --keep-running` | 前端→后端→PostgreSQL/Redis、故障诊断、项目隔离、重建恢复 | 全部 PASS；保留运行中的四服务项目，用于后续网页和 HTTPS 验收 |
 
 `YOUR_IMAGE` 不是公共现成镜像。需要先按 [完整部署指南](fullstack.md#构建示例镜像在开发机ci) 在开发机/CI 构建并推送示例镜像，再替换为服务器能拉取的真实镜像地址。服务器不编译源码。私有仓库凭据管理尚未提供。
 
@@ -35,7 +35,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8088/api
 
 ```bash
 sudo cloudctl runtime load -i fullstack-demo.tar
-sudo cloudctl fullstack-smoke --image docker.io/library/cloud-fullstack-demo:v1 --pull-policy never --keep-running
+sudo cloudctl test fullstack --image docker.io/library/cloud-fullstack-demo:v1 --pull-policy never --keep-running
 ```
 
 镜像名称必须与导入包里的标签一致。记录输出中的 `stack-...` 项目名、前端回环地址。若失败，先查看该项目的任务、诊断与日志，不要反复运行创建更多测试项目。
@@ -74,7 +74,7 @@ Nginx 示例预期 HTTP 为 301/308 且 Location 指向 HTTPS，HTTPS 为 200。
 
 1. `sudo systemctl restart deploy-agent`：等待协调，网页应用/域名仍在，HTTPS 恢复，数据仍能读回。
 2. `sudo systemctl restart deploy-proxy`：等待协调，HTTPS 恢复，仍提供受信任证书。
-3. 网页停止一个独立测试应用，保留另一个应用运行。执行 `sudo reboot`，重新连接后运行 `sudo cloudctl verify`：运行中的应用自动恢复，主动停止的应用仍停止，原域名和数据库数据仍在。
+3. 网页停止一个独立测试应用，保留另一个应用运行。执行 `sudo reboot`，重新连接后运行 `sudo cloudctl status`：运行中的应用自动恢复，主动停止的应用仍停止，原域名和数据库数据仍在。
 4. 在一次性测试节点做安装升级/重装演练：记录应用、域名、数据与登录状态，执行 `sudo bash deploy-platform-0.5.0-linux-amd64.run --upgrade`，再次运行 verify 并访问原 HTTPS/数据。相同包只能验证重装/保留路径；真正跨版本升级需旧版先有数据，再安装新版。
 
 不要在正式节点通过杀数据库、删除运行时目录、强制断电或加速证书续期来做首次验收。数据保留测试也不代表已经验证备份恢复。
@@ -103,10 +103,10 @@ make installer-test
 
 ```bash
 sudo cloudctl status
-sudo cloudctl logs agent
-sudo cloudctl logs control
-sudo cloudctl logs proxy
-sudo cloudctl routes
+sudo cloudctl system-logs agent
+sudo cloudctl system-logs control
+sudo cloudctl system-logs proxy
+sudo cloudctl route list
 free -h
 df -h
 sudo cloudctl runtime system df

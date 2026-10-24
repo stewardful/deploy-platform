@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: dev-test-server
   # Never cancel an installer already changing services on the node.
@@ -15,7 +16,9 @@ jobs:
     uses: ./.github/workflows/build-installers.yml
     with:
       arch: ${{ vars.TEST_SERVER_ARCH || 'amd64' }}
+      delivery: true
   deploy:
+    timeout-minutes: 50
     needs: build
     runs-on: ubuntu-24.04
     steps:
@@ -38,9 +41,12 @@ jobs:
         with:
           name: deploy-platform-linux-${{ vars.TEST_SERVER_ARCH || 'amd64' }}
           path: dist
-      - name: SSH upload and durable independent installer
+      - name: Call cloudctl for protected HTTPS deployment
         if: steps.current.outputs.deploy == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
+          CI_ARTIFACT_DIR: ${{ github.workspace }}/dist
+          DEPLOY_WAIT_SECONDS: '2400'
           TEST_SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
           TEST_SSH_KNOWN_HOSTS: ${{ secrets.TEST_SSH_KNOWN_HOSTS }}
           TEST_SERVER_HOST: ${{ secrets.TEST_SERVER_HOST }}

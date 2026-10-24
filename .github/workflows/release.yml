@@ -34,6 +34,10 @@ jobs:
           pattern: deploy-platform-linux-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          name: cloudctl
+          path: dist
       - name: Pin version tag to this main commit and publish complete release
         env:
           GH_TOKEN: ${{ github.token }}

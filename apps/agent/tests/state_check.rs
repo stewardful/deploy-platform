@@ -3,13 +3,13 @@ use rusqlite::Connection;
 use std::{os::unix::fs::PermissionsExt, process::Command};
 
 #[test]
-fn candidate_migrates_only_isolated_copy_without_a_runtime_binary() {
+fn candidate_checks_only_isolated_copy_without_a_runtime_binary() {
     let root = tempfile::tempdir().unwrap();
     let original = root.path().join("original.sqlite");
     {
         let db = Connection::open(&original).unwrap();
         db.execute_batch(include_str!(
-            "../../../crates/agent-store-sqlite/migrations/001_initial.sql"
+            "../../../crates/agent-store-sqlite/schema.sql"
         ))
         .unwrap();
     }
@@ -43,6 +43,6 @@ fn candidate_migrates_only_isolated_copy_without_a_runtime_binary() {
             .query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
             .unwrap()
     };
-    assert_eq!(version(original), 1);
+    assert_eq!(version(original), 3);
     assert_eq!(version(copy.join("agent.sqlite")), 3);
 }

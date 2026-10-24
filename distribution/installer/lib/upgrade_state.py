@@ -9,10 +9,7 @@ import sqlite3
 import stat
 import subprocess
 import tempfile
-
-
-class UpgradeError(ValueError):
-    """Safe operator-facing message; never include response bodies or credentials."""
+from archive import contract, UpgradeError
 
 
 STATE = Path('/var/lib/deploy-platform')
@@ -27,27 +24,6 @@ def private_json(path, max_bytes=65536):
     if meta.st_size > max_bytes:
         raise UpgradeError('oversized upgrade configuration')
     return json.loads(path.read_text())
-
-
-def contract(manifest):
-    value = manifest.get('compatibility')
-    if value is None:
-        # Explicit known legacy layouts, never guess compatibility of an unknown release.
-        if manifest.get('version') not in ('0.4.1', '0.5.0'):
-            raise UpgradeError('old release has no known compatibility contract')
-        value = {'schema_version': 1, 'agent_api': 'v1', 'paths_revision': 1,
-                 'state': {'agent': {'read_min': 3, 'read_max': 3, 'write': 3},
-                           'ingress': {'read_min': 0, 'read_max': 0, 'write': 0}}}
-    if value.get('schema_version') != 1 or value.get('agent_api') != 'v1' or value.get('paths_revision') != 1:
-        raise UpgradeError('unsupported compatibility contract')
-    if set(value.get('state', {})) != set(DATABASES):
-        raise UpgradeError('incomplete state compatibility contract')
-    for rule in value['state'].values():
-        if set(rule) != {'read_min', 'read_max', 'write'} or any(type(n) is not int for n in rule.values()):
-            raise UpgradeError('invalid schema contract')
-        if not 0 <= rule['read_min'] <= rule['write'] <= rule['read_max']:
-            raise UpgradeError('invalid schema range')
-    return value
 
 
 def database(path):

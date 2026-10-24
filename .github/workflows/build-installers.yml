@@ -6,6 +6,10 @@ on:
         description: amd64, arm64 or both
         type: string
         default: both
+      delivery:
+        description: Upload only the installer and checksums for server HTTPS delivery
+        type: boolean
+        default: false
     outputs:
       version:
         value: ${{ jobs.validate.outputs.version }}
@@ -23,6 +27,19 @@ jobs:
         env:
           BUILD_ARCH: ${{ inputs.arch }}
         run: python3 distribution/ci/version.py
+  cli:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 -B distribution/cli/package.py
+      - run: python3 -I -B target/cli/cloudctl install --help && python3 -I -B target/cli/cloudctl version
+      - run: cd target/cli && sha256sum -c cloudctl.sha256
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cloudctl
+          path: target/cli/*
+          if-no-files-found: error
+          retention-days: 14
   test:
     needs: validate
     runs-on: ubuntu-24.04
@@ -65,18 +82,51 @@ jobs:
           go-version: '1.25.x'
           cache: false
       - run: rustup toolchain install 1.96.0 --profile minimal && rustup default 1.96.0
-      - name: Build offline installer
+      - name: Build requested platform package
         env:
           VERSION: ${{ needs.validate.outputs.version }}
+          PACKAGE_KIND: ${{ inputs.delivery && 'platform-update' || 'offline' }}
         run: make release-build
       - name: Verify installer and checksums
         run: |
           bash target/dist/deploy-platform-*-linux-${{ matrix.arch }}.run --check
           cd target/dist
           sha256sum -c ./*.sha256
+      - name: Build and check the formal offline package on PRs
+        if: github.event_name == 'pull_request' && inputs.delivery
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          PACKAGE_KIND: offline
+          RELEASE_OUTPUT: target/offline
+        run: |
+          make release-build
+          bash target/offline/deploy-platform-*-linux-${{ matrix.arch }}.run --check
+          cd target/offline
+          sha256sum -c ./*.sha256
       - uses: actions/upload-artifact@v6
+        if: github.event_name == 'pull_request' && inputs.delivery
+        with:
+          name: deploy-platform-offline-linux-${{ matrix.arch }}
+          path: |
+            target/offline/*.run
+            target/offline/*.sha256
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        if: ${{ !inputs.delivery }}
         with:
           name: deploy-platform-linux-${{ matrix.arch }}
           path: target/dist/*
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@v6
+        if: inputs.delivery
+        with:
+          name: deploy-platform-linux-${{ matrix.arch }}
+          path: |
+            target/dist/*.run
+            target/dist/*.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3

@@ -481,17 +481,17 @@ mod tests {
         assert_ne!(before, value.fingerprint().unwrap());
     }
     #[test]
-    fn mounts_are_bounded_and_legacy_fingerprints_are_unchanged() {
+    fn mounts_are_bounded_and_optional_fields_roundtrip() {
         let mut value = spec();
         let before = value.fingerprint().unwrap();
-        let old_json = serde_json::to_value(&value).unwrap();
+        let json = serde_json::to_value(&value).unwrap();
         assert!(
-            old_json.get("user").is_none()
-                && old_json.get("volumes").is_none()
-                && old_json.get("secrets").is_none()
+            json.get("user").is_none()
+                && json.get("volumes").is_none()
+                && json.get("secrets").is_none()
         );
-        let old: AppSpec = serde_json::from_value(old_json).unwrap();
-        assert_eq!(before, old.fingerprint().unwrap());
+        let decoded: AppSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(before, decoded.fingerprint().unwrap());
         for path in [
             "/",
             "/etc",
