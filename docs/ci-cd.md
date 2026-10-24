@@ -5,14 +5,14 @@
 | 推送目标 | 自动执行 | 服务器影响 |
 | --- | --- | --- |
 | PR | 复用 dev 的完整检查与 amd64 安装包构建、摘要校验 | 不连接服务器，不读取 SSH 密钥 |
-| dev | 测试 → 按测试机架构构建 → SSH 触发 HTTPS 下载 → 独立 systemd 升级与业务验证 | 自动更新指定测试服务器 |
+| dev | 测试 → 两架构构建 → 公开 dev 预发布 → 可选 SSH 部署 | 默认只发布，开启开关才部署测试服务器 |
 | main | 检查版本 → 测试 → amd64/arm64 构建 → 固定提交的版本标签 → 完整 Release | 正式节点通过网页提示后手动升级 |
 
-PR、dev 和 main 复用 [构建工作流](../.github/workflows/build-installers.yml)。测试未通过不会部署或公开 Release。只有 push 到对应分支或在对应分支手动运行才触发服务器部署或 Release 发布。PR 构建不读取服务器 SSH 密钥，产出 amd64 安装包并校验；arm64 仍在正式发版流程构建。
+PR、dev 和 main 复用 [构建工作流](../.github/workflows/build-installers.yml)。测试未通过不会部署或公开 Release。只有 push 到对应分支或在对应分支手动运行才触发 Release 发布；服务器部署还要求独立开关开启。PR 构建不读取服务器 SSH 密钥，产出 amd64 安装包并校验；dev/main 均构建 amd64 和 arm64。
 
 ## GitHub Secrets 与 Variables
 
-在仓库 Settings → Secrets and variables → Actions 中配置以下 **Repository secrets**，无需把凭据交给聊天或写进源码：
+在仓库 Settings → Secrets and variables → Actions 中配置以下 **Repository secrets**（只打包发布时均不需要；开启服务器自动部署后才需要），无需把凭据交给聊天或写进源码：
 
 | Secret | 内容 |
 | --- | --- |
@@ -49,15 +49,15 @@ ssh-keygen -lf test_known_hosts
 
 服务器使用 Ubuntu 24.04 或 26.04 LTS/systemd，确认架构、磁盘和端口满足 [安装指南](install.md)。SSH 用户需要 `sudo -n true` 成功，并能无交互执行安装所需的 root 管理命令；root 登录也需要服务器安装 sudo。确保 Python 3、sudo 和 systemd-run 可用，部署公钥已加入该用户的 authorized_keys。
 
-**首次只使用 cloudctl**：从本仓库成功 CI 的 `cloudctl` 产物获取命令和摘要，在服务器校验后执行 `sudo /usr/bin/python3 -I -B ./cloudctl install --channel dev --token-file /绝对路径/github.token`，或使用 `--file /绝对路径/平台.run` 离线安装。安装完成后用 `sudo cloudctl delivery preflight amd64` 检查节点。命令会输出当前仓库、架构与 `phase=ready`；CI 只向已经安装的平台发指令，不上传执行代码。详见 [首次安装](install.md#统一-cloudctl-首次安装)。
+**首次只使用 cloudctl**：从本仓库公开 dev 预发布获取 `cloudctl` 和摘要，无需服务器 token，在服务器校验后执行 `sudo /usr/bin/python3 -I -B ./cloudctl install --channel dev`，或使用 `--file /绝对路径/平台.run` 离线安装。安装完成后用 `sudo cloudctl delivery preflight amd64` 检查节点。命令会输出当前仓库、架构与 `phase=ready`；CI 只向已经安装的平台发指令，不上传执行代码。详见 [首次安装](install.md#统一-cloudctl-首次安装)。
 
-首次部署可自动调用安装器安装依赖；已有平台时使用 `--upgrade --skip-apt`。运行项目须按 [升级保障](upgrade.md) 配置 `/etc/deploy-platform/upgrade-checks.json`，缺少探针、schema/运行时不兼容、任务未排空或验证失败都使 Actions 失败，保护规则不会因 dev 环境而跳过。
+首次安装通过 cloudctl 调用安装器安装依赖；CI 只操作已有平台，使用 `--upgrade --skip-apt`。运行项目须按 [升级保障](upgrade.md) 配置 `/etc/deploy-platform/upgrade-checks.json`，缺少探针、schema/运行时不兼容、任务未排空或验证失败都使 Actions 失败，保护规则不会因 dev 环境而跳过。
 
 同一版本号下 dev 可反复部署不同提交，按清单摘要区分包。安装器仍禁止平台版本降级，所以 dev 的版本不能低于测试机当前版本。正式节点不应作为 dev 测试目标。
 
 ## 开发和发版
 
-日常在 dev 提交和推送即可。工作流串行处理测试部署，不取消已经运行的安装器；部署前会检查 dev 分支最新提交，过期提交跳过服务器操作。
+日常在 dev 提交和推送即可自动打包并发布。工作流串行处理测试部署，不取消已经运行的安装器；部署前会检查 dev 分支最新提交，过期提交跳过服务器操作。
 
 main 发版前提高 `Cargo.toml` 的 workspace 与内部组件版本，更新 Cargo.lock 并运行检查，再把经过测试的代码合并/推送 main。无需手动打标签，工作流自动创建 `vX.Y.Z`，明确指向该次 main 事件的完整提交 SHA，完全不依赖默认分支 dev。
 
@@ -65,7 +65,7 @@ main 发版前提高 `Cargo.toml` 的 workspace 与内部组件版本，更新 C
 
 不再通过推送版本标签启动第二次发布。需要重跑时，在 Actions 中重跑失败任务，或选择对应分支手动运行工作流。
 
-仓库默认分支为 dev。修复通过 PR 合并到 dev 后，自动触发测试服务器部署；PR 检查通过不代表服务器已经更新。
+仓库默认分支为 dev。修复通过 PR 合并到 dev 后，自动触发打包发布；仅当 Repository variable `TEST_SERVER_AUTO_DEPLOY` 严格等于字符串 `true` 时才部署服务器；PR 检查通过不代表服务器已经更新。
 
 ## SSH 中断与排错
 
@@ -107,3 +107,15 @@ bash distribution/tests/ci-ssh-smoke.sh /ABS/deploy-platform-VERSION-linux-ARCH.
 ## 单仓库维护
 
 CLI、CI 控制端、下载组件、安装器和测试全部在本仓库维护。`distribution/cli` 构建通用 cloudctl；`distribution/ci` 负责 runner 端指令；`distribution/installer/lib` 负责节点逻辑。没有独立工具安装包、跨仓库同步、GitHub App 或额外 CI Secret。正式 Release 同时分发 cloudctl、其校验文件及两种架构的完整离线平台包。
+
+## dev 公开分发与自动部署开关
+
+[dev 工作流](../.github/workflows/dev-deploy.yml) 的 build、publish、deploy 是独立 job。publish 必须等待完整构建与测试成功；使用 job 级 Contents:write 和 Actions:read，不读取 SSH Secrets。deploy 必须等待 publish，且 Repository variable `TEST_SERVER_AUTO_DEPLOY` 严格为 `true`；未设置或任何其他值均跳过，正常打包发布不受影响。`TEST_SERVER_ARCH` 只决定测试机部署架构，不限制 dev 发布的两种架构。
+
+仓库公开，服务器从 Release CDN 匿名拉取，不需要 PAT 或 GitHub App。CI 内部仍可使用自带 GITHUB_TOKEN 处理 Actions 临时附件；这不要求服务器认证。
+
+发布器 [dev-release.py](../distribution/ci/dev-release.py) 验证内嵌来源、摘要、双架构资产齐全后，以草稿创建 `dev-RUN_ID`，固定标签指向该 dev 事件 SHA，全部上传成功才公开预发布。重跑可继续未公开草稿；已公开资产只核对，不覆盖。任何冲突失败，须发起新运行/提交。随后更新 `dev-latest` 的 cloudctl、摘要，最后更新 dev.json；构建安装包始终从固定标签下载。最新指针只在仍为 dev 当前提交且没有更新运行已晋升时更新，不标记为正式 latest。旧运行重跑不会替换新的最新构建。
+
+dev Release 保留两架构平台更新包、摘要、cloudctl 和 dev.json，不再受 Actions 的三天附件保留期影响，暂无自动清理。正式完整离线包仍只在 main 发布；PR 额外构建离线包用于验收。下载、首次安装和升级命令见 [安装指南](install.md#统一-cloudctl-首次安装)。
+
+如果仓库之前通过 GitHub 的 Disable workflow 暂停了 dev 工作流，必须等这份代码合并后再恢复启用。先确保 `TEST_SERVER_AUTO_DEPLOY=false`，再 Enable workflow，并在 dev 手动 Run workflow 补发首包；只发布、不部署。此后每次 dev 推送自动发布。不能为了打包在旧版工作流上直接恢复自动部署。

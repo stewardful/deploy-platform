@@ -144,36 +144,60 @@ VERSION=0.5.3 make release-build
 
 生成 `target/dist/*.run`、`.tar.gz`、`.sha256`。`package.py` 也可以接收已构建的 `--bin-dir`、`--web-dir` 和 `--runtime-archive`，会检查 ELF 架构和每个文件的摘要。`Dockerfile.agent` 可从其他系统构建 Linux Agent，Go 可交叉编译，Web 产物与架构无关。
 
-推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送通过 SSH 自动更新指定测试机，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
+推送 main 触发两种架构构建、校验和 GitHub Release 发布；dev 推送发布公开预发布包，只有开启独立开关后才通过 SSH 更新测试机，见 [CI/CD](ci-cd.md)。正式节点仍通过 [网页手动升级](updates.md)，旧版需先安装包含更新器的版本。
 
 Ubuntu 26.04 的适配与本地安装、升级验收入口见 [Ubuntu 兼容性验证](ubuntu-compatibility.md)。
 
 
 ## 统一 cloudctl 首次安装
 
-首次在开发机从本仓库成功 CI 下载 `cloudctl` 产物（仅包含 cloudctl 和 cloudctl.sha256），将这两个小文件上传服务器。正式发布后也可从本仓库 Release 获取。服务器无需 Git、Rust、Go、Node 或额外交付工具，依赖 Python 3/systemd/cgroup v2。
+公开仓库的 dev 构建发布到 GitHub 预发布 Release，服务器无需 GitHub token、GitHub CLI、Git、Rust、Go、Node 或额外交付工具。需要 Python 3、curl、systemd、cgroup v2，以及访问 GitHub/Release CDN 和 Ubuntu 软件源的网络。
 
-服务器执行：
+首次在服务器准备命令（须等本改动合并、工作流恢复启用并成功发布第一份预发布包后执行）：
 
 ```bash
+mkdir -p ~/deploy-platform-bootstrap
+cd ~/deploy-platform-bootstrap
+curl --proto '=https' --tlsv1.2 --fail --location --retry 3 --connect-timeout 20 --max-time 120 \
+  -o cloudctl https://github.com/stewardful/deploy-platform/releases/download/dev-latest/cloudctl
+curl --proto '=https' --tlsv1.2 --fail --location --retry 3 --connect-timeout 20 --max-time 120 \
+  -o cloudctl.sha256 https://github.com/stewardful/deploy-platform/releases/download/dev-latest/cloudctl.sha256
 sha256sum -c cloudctl.sha256
-chmod +x cloudctl
-sudo ./cloudctl install --channel dev --token-file /绝对路径/github.token
-sudo cloudctl status
 ```
 
-私有仓库在线下载需要一个有 Actions:read 权限的 GitHub token，保存在服务器私有文件中（0600）；通过 `--token-file` 引用，不能把 token 值写进命令。`--run-id ID` 可固定 dev 构建，省略则选择最新测试通过且产物可用的构建。首次命令明确执行安装，无需再加 --yes。
+摘要必须显示 `cloudctl: OK`，失败时不要执行；发布切换期间两个小文件可能属于不同构建，可重新下载这两个文件后重试校验。校验通过后，一条命令完成首次安装：
 
-正式版：`sudo /usr/bin/python3 -I -B ./cloudctl install --channel stable --version X.Y.Z --token-file /绝对路径/github.token`；省略 --version 选择最新正式 Release，私有 Release 需要 Contents:read。公有仓库可省略 token 文件。`--repository` 默认 stewardful/deploy-platform。
+```bash
+sudo /usr/bin/python3 -I -B ./cloudctl install --channel dev
+```
 
-已有本地安装包时无需 GitHub token：
+默认读取公开 `dev-latest/dev.json`，随后固定到 `dev-RUN_ID/dev.json` 和该构建的安装包。首次安装自动识别 amd64/arm64，检查来源、版本、摘要、大小和内嵌提交记录。`--run-id ID` 可指定已经发布的构建，无需登录 GitHub；不存在或被删除的构建明确失败，不回退到其他版本。`--repository owner/repo` 可选择使用同一发布契约的公开仓库，默认 stewardful/deploy-platform。
+
+正式版：`sudo /usr/bin/python3 -I -B ./cloudctl install --channel stable --version X.Y.Z`；省略 --version 选择最新正式 Release。私有正式 Release 可额外传 `--token-file /绝对路径/github.token`，文件权限必须 0600，凭据需要 Contents:read；公开 dev 路径不读取该 token。没有新增私有 dev Actions 下载兼容路径。
+
+已有本地安装包时：
 
 ```bash
 sudo /usr/bin/python3 -I -B ./cloudctl install --file /绝对路径/deploy-platform-0.5.3-linux-amd64.run
 ```
 
-install 只用于首次安装，已有平台会明确拒绝，不进行重置或覆盖。命令默认等待完成；`--no-wait` 仅提交任务。首次安装在独立 systemd 任务中运行，SSH 断开不取消；使用 `sudo cloudctl update status` 和 `sudo cloudctl system-logs install` 查询。若命令等待超时，先查询任务，不重复安装。服务器重启不自动重试中断的安装。
+install 只用于首次安装，已有平台会明确拒绝，不重置数据。命令默认等待完成；`--no-wait` 仅提交任务。首次安装在独立 systemd 任务中运行，SSH 断开不取消；使用 `sudo cloudctl update status` 和 `sudo cloudctl system-logs install` 查询。若命令等待超时，先查询任务，不重复安装。服务器重启不自动重试中断的安装。
 
-安装后固定入口为 `/usr/local/bin/cloudctl`，日常执行 `cloudctl apps`、`cloudctl status`、`cloudctl upgrade` 和 `cloudctl upgrade-dev`。首次下载器与平台内 CLI 共用源码和安装逻辑；bootstrap 缓存位于 `/opt/deploy-platform/bootstrap`，仅供安装任务固定代码使用，不是另一个产品或常驻服务。首次安装失败会保留该 CLI 入口用于查询日志。
+安装后固定入口为 `/usr/local/bin/cloudctl`，后续更新一条命令：
 
-CI 使用同一入口 `cloudctl delivery preflight|start|refresh|status|logs`；任务数据保存在 `/var/lib/deploy-platform/delivery/jobs`，GitHub token 留在 runner。首次在线下载所用服务器 token 是手动操作的凭据；CI 不需要它。
+```bash
+sudo cloudctl upgrade-dev --yes
+```
+
+该命令提交更新，成功受理不代表安装已完成；用 `sudo cloudctl update status` 查询，`phase=succeeded` 才代表完成。不加 --yes 只预览。安装器保留兼容性检查、维护排空、备份、业务验证和失败回退。
+
+首次下载器与平台内 CLI 共用源码和安装逻辑；bootstrap 缓存位于 `/opt/deploy-platform/bootstrap`，供安装任务固定代码使用，不是另一个产品或常驻服务。首次安装失败保留 CLI 入口用于查询日志。
+
+## 构建产物位置
+
+- Actions Artifacts：`cloudctl`（14 天）、`deploy-platform-linux-amd64/arm64`（dev 更新包 3 天）；PR 另有完整离线验证包（3 天）。这些是 CI 中间产物，不是服务器手动安装的数据源。
+- GitHub Releases：每次成功 dev 构建发布 `dev-RUN_ID` 预发布，包含 cloudctl、校验文件、两架构平台更新包和 dev.json；`dev-latest` 只放最新发现清单和 cloudctl 两个小文件。预发布不自动过期，不覆盖固定构建资产，暂无自动清理；删除后无法再用该构建编号安装。
+- 正式 `vX.Y.Z` Release：cloudctl、两种架构完整离线包及摘要。dev 只打平台更新包，基础运行时按锁定版本下载或复用。
+- 安装后的服务器：`/opt/deploy-platform/releases/` 存放不可变版本，`current` 指向当前版本；配置在 `/etc/deploy-platform/`，业务数据在 `/var/lib/deploy-platform/`。
+
+CI 自动部署使用同一入口 `cloudctl delivery preflight|start|refresh|status|logs`，仅在显式打开部署开关后运行；任务数据保存在 `/var/lib/deploy-platform/delivery/jobs`，临时 Actions 授权留在 runner/私有票据中，不向服务器保存 GitHub token。

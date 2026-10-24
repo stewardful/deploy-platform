@@ -40,11 +40,11 @@ class FirstInstallTests(unittest.TestCase):
         mask = os.umask(0o022); self.addCleanup(os.umask, mask)
 
     def test_dev_install_pins_candidate_and_launches_existing_worker_without_token_in_request(self):
-        token = self.root/'token'; token.write_text('private-token'); token.chmod(0o600)
         request = {'channel': 'dev', 'repository': 'owner/repo', 'run_id': '42', 'commit': 'a'*40, 'arch': 'amd64'}
         with patch('dev_update.discover', return_value=request) as discover:
-            first.main(['--channel', 'dev', '--repository', 'owner/repo', '--token-file', str(token), '--no-wait'])
+            first.main(['--channel', 'dev', '--repository', 'owner/repo', '--no-wait'])
         discover.assert_called_once_with(None, initial=True)
+        self.assertEqual(json.loads(worker.CONFIG.read_text())['token_file'], '')
         value = json.loads((worker.SPOOL/'request.json').read_text())
         self.assertEqual(value['operation'], 'install')
         self.assertEqual(value['commit'], 'a'*40)

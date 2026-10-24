@@ -41,7 +41,7 @@ def main(argv):
     stable.add_argument('--version', required=True, help='Exact X.Y.Z from update check')
     stable.add_argument('--yes', action='store_true', required=True, help='Explicitly approve this stable version')
     dev = sub.add_parser('upgrade-dev', help='Inspect or queue a dev build; never selects a stable Release', allow_abbrev=False)
-    dev.add_argument('--run-id', help='Exact dev-deploy.yml Actions run ID; default: latest build with successful CI and usable artifact')
+    dev.add_argument('--run-id', help='Exact published dev run ID; default: latest CI-passed public prerelease')
     dev.add_argument('--yes', action='store_true', help='Approve this dev run; otherwise inspect metadata only')
     args = p.parse_args(argv)
     if os.geteuid() != 0: raise ValueError('sudo is required')

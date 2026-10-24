@@ -36,17 +36,17 @@ docs/            设计、使用、验收和维护说明
 
 ## 安装到 Ubuntu
 
-从本仓库成功 CI 的 `cloudctl` 产物或正式 Release 获取 cloudctl 和校验文件，在服务器校验后使用同一命令安装与升级：
+从本仓库公开 dev 预发布或正式 Release 获取 cloudctl 和校验文件，在服务器校验后使用同一命令安装与升级：
 
 ```bash
 sha256sum -c cloudctl.sha256
 chmod +x cloudctl
-sudo ./cloudctl install --channel dev --token-file /绝对路径/github.token
+sudo ./cloudctl install --channel dev
 sudo cloudctl status
 sudo cloudctl token
 ```
 
-私有仓库在线 dev 安装需要 Actions:read 的 token 私有文件；正式安装用 `--channel stable`，私有 Release 需要 Contents:read。已有离线包可用 `cloudctl install --file /绝对路径/平台.run`。安装后使用 `cloudctl upgrade-dev` 或 `cloudctl upgrade`；详见 [统一首次安装](docs/install.md#统一-cloudctl-首次安装)。
+公开 dev 预发布安装无需 token；正式安装用 `--channel stable`，私有 Release 需要 Contents:read。已有离线包可用 `cloudctl install --file /绝对路径/平台.run`。安装后使用 `cloudctl upgrade-dev` 或 `cloudctl upgrade`；详见 [统一首次安装](docs/install.md#统一-cloudctl-首次安装)。
 
 电脑建立 SSH 隧道后，访问 `http://127.0.0.1:8088/` 登录；管理端保持回环监听。业务域名通过独立 Caddy 提供 HTTPS。准备安装包、示例镜像、密钥、DNS 和端口的完整步骤见 [腾讯云手册](docs/tencent-ubuntu-walkthrough.md)。
 
@@ -75,4 +75,4 @@ make web-e2e
 - 后台恢复针对容器进程；HTTP 健康检查为按需快照，不自动触发重启或后台告警。
 - 本地 Ubuntu ARM64 已完成真实运行验收；AMD64 与公网云节点的验证边界见测试报告。2 GiB 不代表可以运行任意数量的服务或本地大模型。
 
-Rust 组件暂设 `publish = false`，Go 模块使用本地模块路径。正式对外发布前需确定实际仓库路径、许可证、公共 API 和版本策略；推送 main 会触发 GitHub Release 工作流，dev 推送自动部署专用测试机，配置见 [CI/CD](docs/ci-cd.md)；服务器只检查更新，必须由管理员确认升级。组件库本身尚未发布至 crates.io/npm/Go 公共模块。
+Rust 组件暂设 `publish = false`，Go 模块使用本地模块路径。正式对外发布前需确定实际仓库路径、许可证、公共 API 和版本策略；推送 main 会触发 GitHub Release 工作流，dev 推送发布公开预发布包，仅开启独立开关后部署测试机，配置见 [CI/CD](docs/ci-cd.md)；服务器只检查更新，必须由管理员确认升级。组件库本身尚未发布至 crates.io/npm/Go 公共模块。

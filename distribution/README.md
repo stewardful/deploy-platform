@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `cli/` | 构建统一管理命令 | `python3 -B distribution/cli/package.py` |
 | `release/` | 开发机/CI 构建与打包 | `build.sh`、`package.py`、运行时/代理锁定清单 |
-| `ci/` | 版本、正式发版、工作流检查、SSH 指令 | `version.py`、`release.py`、`deploy-test.sh` |
+| `ci/` | 版本、正式发版、工作流检查、SSH 指令 | `version.py`、`dev-release.py`、`release.py`、`deploy-test.sh` |
 | `installer/` | `.run` 在 Ubuntu 上的安装、升级与自检 | `bootstrap.sh.in`、`install.sh`、`cloudctl` |
 | `installer/systemd/` | 一键安装器的专属运行时与服务 | containerd、Agent、Go/Web、Caddy 四个 unit |
 | [manual](manual/README.md) | 已有运行时的手动集成 | `manual/systemd/`，仅 Agent 和控制端 |
@@ -27,3 +27,5 @@ make release-build
 [安装指南](../docs/install.md) · [手工 Agent 集成](../docs/agent.md) · [测试与上云验收](../docs/acceptance.md)
 
 `cli/` 构建通用 cloudctl 命令；首次安装和后续升级共用 installer/lib 中的下载、状态和安装逻辑。
+
+公开 dev 预发布分发 cloudctl 和两架构平台更新包，无需服务器 token；自动部署通过 `TEST_SERVER_AUTO_DEPLOY=true` 单独开启，默认关闭。

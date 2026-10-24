@@ -1,4 +1,4 @@
-name: Dev test server deployment
+name: Dev prerelease and optional deployment
 on:
   push:
     branches: [dev]
@@ -7,7 +7,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: dev-test-server
+  group: dev-release-and-optional-deploy
   # Never cancel an installer already changing services on the node.
   cancel-in-progress: false
 jobs:
@@ -15,11 +15,34 @@ jobs:
     if: github.ref == 'refs/heads/dev'
     uses: ./.github/workflows/build-installers.yml
     with:
-      arch: ${{ vars.TEST_SERVER_ARCH || 'amd64' }}
+      arch: both
       delivery: true
-  deploy:
-    timeout-minutes: 50
+  publish:
     needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: deploy-platform-linux-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          name: cloudctl
+          path: dist
+      - name: Publish immutable dev build and latest discovery pointer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 distribution/ci/dev-release.py
+  deploy:
+    # Publishing never requires server secrets. Default is OFF.
+    if: vars.TEST_SERVER_AUTO_DEPLOY == 'true'
+    timeout-minutes: 50
+    needs: [build, publish]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
