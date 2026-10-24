@@ -209,17 +209,11 @@ func TestSubmittedTaskDoesNotRetryAfterResultIsReplaced(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.dir, "result.json"), []byte(`{"channel":"stable","phase":"succeeded"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	restartedDone := make(chan struct{})
-	go func() { defer close(restartedDone); s.Run(ctx) }()
-	n := notifications.Notice{Repository: "stewardful/deploy-platform", Channel: "dev", Tag: "dev-42", ReleaseID: 1, PublishedAt: time.Now().UTC()}
-	if err := s.acceptNotice(n); err != nil {
+	// A fresh process reads the durable marker, without relying on ticker timing.
+	restarted := &Service{dir: s.dir}
+	if err := restarted.submitDev("stewardful/deploy-platform", "42"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	stop()
-	<-restartedDone
 	if _, err := os.Stat(filepath.Join(s.dir, "request.json")); !os.IsNotExist(err) {
 		t.Fatal("submitted build retried after restart")
 	}
