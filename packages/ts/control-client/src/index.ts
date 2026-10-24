@@ -232,6 +232,18 @@ export interface LogSnapshot {
   tail: number;
 }
 export interface PlatformUpdate {
+  notifications: {
+    enabled: boolean;
+    dev_auto_upgrade: boolean;
+    dev_tag: string;
+    error: string;
+    last_attempt: {
+      schema_version: number;
+      repository: string;
+      run_id: string;
+      phase: string;
+    } | null;
+  };
   enabled: boolean;
   current: string;
   candidate: { version: string; asset_id: number; size: number; digest: string } | null;

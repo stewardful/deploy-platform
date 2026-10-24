@@ -17,8 +17,9 @@ const phases: Record<string, string> = {
   succeeded: '已完成',
   failed: '未完成',
   interrupted: '执行中断',
+  skipped: '未执行升级',
 };
-const terminal = new Set(['succeeded', 'failed', 'interrupted']);
+const terminal = new Set(['succeeded', 'failed', 'interrupted', 'skipped']);
 export function PlatformUpdates({
   client,
   onUnauthorized,
@@ -120,8 +121,25 @@ export function PlatformUpdates({
       {status?.checked_at && (
         <p className="muted">
           上次检查：{new Date(status.checked_at).toLocaleString('zh-CN')} ·
-          每小时自动检查，仅手动升级
+          通过发布通知和启动补查发现正式版，仅手动升级
         </p>
+      )}
+      {status?.enabled && (
+        <p className="muted">
+          发布通知：{status.notifications.enabled ? '已配置 Webhook' : '未配置 Webhook'} · dev
+          自动升级：
+          {status.notifications.dev_auto_upgrade ? '开启' : '关闭'}
+          {status.notifications.dev_tag && ` · 收到 ${status.notifications.dev_tag} 通知`}
+        </p>
+      )}
+      {status?.notifications.last_attempt?.phase === 'failed' && (
+        <Alert
+          theme="warning"
+          message="上次 dev 自动升级未完成，该构建不会自动重试，请查看日志并手动处理。"
+        />
+      )}
+      {status?.notifications.error && (
+        <Alert theme="warning" message={status.notifications.error} />
       )}
       {execution && (
         <Alert

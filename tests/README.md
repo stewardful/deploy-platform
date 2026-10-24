@@ -19,4 +19,4 @@ CLOUD_TEST_WEB_UPDATE=1 bash distribution/tests/upgrade-smoke.sh /ABS/bootstrap-
 
 此模式只在脚本创建的可删除 Ubuntu 节点内安装隔离 GitHub HTTPS 测试端点与 CA，通过真实 Go API、私有凭据、systemd.path 和下载器执行升级；不会配置生产自定义下载地址。启动包必须含网页更新器且版本低于目标包；演示镜像需为 `cloud-fullstack-demo:upgrade-check`。默认模式保留原有手动升级验收。
 
-CI 交付组件测试见 `tests/installer/test_ci.py`：版本/架构策略、main 提交标签、发布幂等、root 执行器与 SSH 参数校验。
+发布组件测试见 `tests/installer/test_ci.py`：版本/架构策略、main 提交标签与发布幂等。通知客户端和自动策略由 Go/Python 组件测试验证；真实签名 Webhook → Go → 独立 worker → HTTPS dev 包 → 原安装器链路可执行 `bash distribution/tests/notification-smoke.sh /ABS/offline.run /ABS/update.run`，仅创建可删除的 Ubuntu 节点，不连接用户服务器。

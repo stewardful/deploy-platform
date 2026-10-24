@@ -14,7 +14,7 @@ import tarfile
 
 MAX_BYTES = 2 * 1024**3
 MAX_FILES = 5000
-CURRENT_CLI_FILES = {'lib/node_cli.py', 'lib/first_install.py', 'lib/ci_control.py', 'lib/ci_worker.py', 'lib/ci_state.py', 'lib/delivery.py'}
+CURRENT_CLI_FILES = {'lib/dev_update.py', 'lib/dev_manifest.py', 'lib/notification_updates.py', 'lib/node_cli.py', 'lib/first_install.py'}
 
 
 def require_current(manifest):

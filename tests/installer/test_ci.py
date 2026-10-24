@@ -1,4 +1,4 @@
-"""CI delivery policy, pinned releases and root wrapper failure reporting."""
+"""CI build policy and pinned, idempotent formal releases."""
 import hashlib
 import importlib.util
 import json

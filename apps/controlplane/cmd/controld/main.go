@@ -34,12 +34,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var updater httpapi.Updater
+	var webhook http.Handler
 	if cfg.UpdatesDir != "" {
 		service, err := updates.New(cfg.UpdatesDir, cfg.ReleaseManifest, cfg.UpdatesConfig)
 		if err != nil {
 			return err
 		}
 		updater = service
+		webhook = service.WebhookHandler()
 		go service.Run(ctx)
 	}
 	handler, err := httpapi.NewWithUpdates(control.New(client), cfg.Token, updater)
@@ -49,6 +51,16 @@ func run() error {
 	handler, err = webui.New(handler, cfg.WebDir)
 	if err != nil {
 		return err
+	}
+	if webhook != nil {
+		site := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/hooks/github/releases" {
+				webhook.ServeHTTP(w, r)
+				return
+			}
+			site.ServeHTTP(w, r)
+		})
 	}
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {

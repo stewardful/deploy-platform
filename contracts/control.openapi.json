@@ -3,7 +3,7 @@
   "info": {
     "title": "Deploy Platform single-node control API",
     "version": "0.5.2",
-    "description": "Go control API backed by the local Rust Agent Unix Socket. No control-plane database or automatic submission retry. 202 persists an Agent job, not application readiness. A failed terminal job is returned by GET with 200. Bearer token required on every route. Default listener is loopback only; no remote node transport or multi-user authorization. Platform update endpoints discover stable GitHub releases and queue explicit systemd upgrades separately from Agent deployment jobs."
+    "description": "Go control API backed by the local Rust Agent Unix Socket. No control-plane database or automatic submission retry. 202 persists an Agent job, not application readiness. A failed terminal job is returned by GET with 200. Bearer token required on management routes. The isolated release webhook requires a raw-body HMAC signature instead. Default listener is loopback only; no remote node transport or multi-user authorization. Platform update endpoints discover stable GitHub releases and queue explicit systemd upgrades separately from Agent deployment jobs."
   },
   "servers": [
     {
@@ -686,6 +686,67 @@
           }
         }
       }
+    },
+    "/hooks/github/releases": {
+      "post": {
+        "summary": "Verify GitHub release webhook and persist a bounded local task hint",
+        "description": "No synchronous installation. The existing worker applies local dev policy and upgrade protections; stable releases only discover a candidate and require manual confirmation. Duplicate and older versions are idempotent.",
+        "security": [
+          {
+            "GitHubWebhookSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-GitHub-Event",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-GitHub-Delivery",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "GitHub release event raw JSON, maximum 256 KiB; extra GitHub fields are ignored."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated release reliably persisted; installation may be disabled or pending."
+          },
+          "204": {
+            "description": "Signed ping or irrelevant event."
+          },
+          "401": {
+            "description": "Invalid raw-body signature."
+          },
+          "413": {
+            "description": "Body exceeds 256 KiB."
+          },
+          "422": {
+            "description": "Wrong repository or unsupported release metadata."
+          },
+          "503": {
+            "description": "Webhook not configured, busy, or persistence failed."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -693,6 +754,12 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer"
+      },
+      "GitHubWebhookSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Hub-Signature-256",
+        "description": "sha256= followed by HMAC-SHA256 hex of the exact request body using the server-local webhook secret."
       }
     },
     "schemas": {
@@ -772,7 +839,8 @@
           "candidate",
           "checked_at",
           "error",
-          "execution"
+          "execution",
+          "notifications"
         ],
         "properties": {
           "enabled": {
@@ -843,7 +911,8 @@
                       "installing",
                       "succeeded",
                       "failed",
-                      "interrupted"
+                      "interrupted",
+                      "skipped"
                     ]
                   },
                   "message": {
@@ -852,6 +921,69 @@
                 }
               }
             ]
+          },
+          "notifications": {
+            "type": "object",
+            "required": [
+              "enabled",
+              "dev_auto_upgrade",
+              "dev_tag",
+              "error",
+              "last_attempt"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "dev_auto_upgrade": {
+                "type": "boolean",
+                "description": "Server-local policy; absent local configuration is off."
+              },
+              "dev_tag": {
+                "type": "string",
+                "description": "Untrusted release hint; not proof of installation."
+              },
+              "error": {
+                "type": "string"
+              },
+              "last_attempt": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "schema_version",
+                      "repository",
+                      "run_id",
+                      "phase"
+                    ],
+                    "properties": {
+                      "schema_version": {
+                        "type": "integer",
+                        "const": 1
+                      },
+                      "repository": {
+                        "type": "string"
+                      },
+                      "run_id": {
+                        "type": "string"
+                      },
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "attempted",
+                          "failed",
+                          "succeeded",
+                          "skipped"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
           }
         }
       }

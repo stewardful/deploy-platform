@@ -40,11 +40,11 @@ class FirstInstallTests(unittest.TestCase):
         mask = os.umask(0o022); self.addCleanup(os.umask, mask)
 
     def test_dev_install_pins_candidate_and_launches_existing_worker_without_token_in_request(self):
-        token = self.root/'token'; token.write_text('private-token'); token.chmod(0o600)
         request = {'channel': 'dev', 'repository': 'owner/repo', 'run_id': '42', 'commit': 'a'*40, 'arch': 'amd64'}
         with patch('dev_update.discover', return_value=request) as discover:
-            first.main(['--channel', 'dev', '--repository', 'owner/repo', '--token-file', str(token), '--no-wait'])
+            first.main(['--channel', 'dev', '--repository', 'owner/repo', '--no-wait'])
         discover.assert_called_once_with(None, initial=True)
+        self.assertEqual(json.loads(worker.CONFIG.read_text())['token_file'], '')
         value = json.loads((worker.SPOOL/'request.json').read_text())
         self.assertEqual(value['operation'], 'install')
         self.assertEqual(value['commit'], 'a'*40)
@@ -53,6 +53,12 @@ class FirstInstallTests(unittest.TestCase):
         self.assertIn('--no-block', command)
         self.assertIn(str(ROOT/'distribution/installer/lib/update_worker.py'), command)
         self.assertEqual((worker.SPOOL/'request.json').stat().st_mode & 0o077, 0)
+
+    def test_public_dev_install_rejects_unnecessary_private_token_before_host_mutation(self):
+        with self.assertRaisesRegex(first.InstallError, 'only used for stable'):
+            first.main(['--channel','dev','--token-file',str(self.root/'missing-token')])
+        self.preflight.assert_not_called(); self.launch.assert_not_called()
+        self.assertFalse(worker.CONFIG.exists())
 
     def test_stable_first_install_pins_and_revalidates_latest_release_asset(self):
         release = {'tag_name': 'v0.5.3', 'draft': False, 'prerelease': False,

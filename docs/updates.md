@@ -12,7 +12,7 @@
 
 ## 服务器配置
 
-默认检查 `stewardful/deploy-platform` 的最新正式 GitHub Release，每小时一次，控制端启动约十秒后首次检查。手动检查至少间隔一分钟，包括失败请求，防止耗尽 GitHub 配额。页面每三十秒查询本地状态，有升级任务时每五秒查询；隐藏标签页暂停查询。
+默认检查 `stewardful/deploy-platform` 的最新正式 GitHub Release，在控制端启动约十秒后补查，已验签 Webhook 发布通知触发检查。手动检查至少间隔一分钟，包括失败请求，防止耗尽 GitHub 配额。页面每三十秒查询本地状态，有升级任务时每五秒查询；隐藏标签页暂停查询。
 
 公共仓库无需凭据。私有仓库需要管理员创建仅允许该仓库 **Contents: read** 的 GitHub fine-grained token，写入服务器 `/etc/deploy-platform/github.token`，权限为 `0600`，不要放在源码、Shell 历史或网页中。再创建：
 
@@ -70,14 +70,14 @@ sudo cat /var/lib/deploy-platform/updates/result.json
 
 命令行正式升级复用上述 API 和 worker：`cloudctl update check` 后显式运行 `cloudctl upgrade --version X.Y.Z --yes`。查询执行结果用 `cloudctl update status`，该查询不依赖正在重启的控制端。应用操作、平台升级和业务应用发布的边界见 [命令指南](commands.md)。
 
-`cloudctl upgrade-dev` 默认查找最新通过构建和测试且产物可用的 dev 构建，只展示固定元数据；`cloudctl upgrade-dev --yes` 选择并提交当前最新候选。保留 `--run-id RUN_ID` 指定某次构建；指定模式失败时不会自动选择其他构建。私有仓库需要服务器配置的 token 对该仓库有 **Actions: read** 权限；正式版 Contents 只读权限不足以下载 Actions 产物。凭据仍从现有私有文件读取，不能传在命令行、日志或网页参数中。
+`cloudctl upgrade-dev` 默认读取公开 `dev-latest/dev.json`，只预览；`cloudctl upgrade-dev --yes` 选择并提交最新已发布候选。`--run-id RUN_ID` 固定到 `dev-RUN_ID` 预发布。无需服务器 token，不读取 Actions API，也不保留旧 Actions 产物筛选路径。公开源码不能让 Actions 附件匿名下载，服务器分发使用公开 Release 附件。
 
-默认查询最多最近 100 个已结束运行，按工作流构建序号从新到旧筛选；旧构建重跑不会因此成为最新。跳过不合格来源、测试失败、产物缺失/过期/架构不符的候选；鉴权失败、限流、网络或元数据响应损坏时直接中止，不把 API 故障当作无效候选。没有可用构建时失败，可用 `--run-id` 查询搜索范围以外的构建。无编号预览和确认是独立查询，需要与预览完全一致时显式传回运行编号；入队后始终固定该构建，执行时只重新核对它，不重新选择最新版本。
+发布工作流在测试、cloudctl 和两架构打包均通过后，先以草稿上传完整资产，再公开固定构建。固定标签指向 dev 事件提交，不覆盖已发布资产；较旧源码完成或旧运行重跑不会把最新指针回退。未成功发布的构建不会成为候选；预发布不会成为正式版 latest。
 
-dev 来源固定为配置仓库的 `.github/workflows/dev-deploy.yml`、`dev` 分支、push/workflow_dispatch，拒绝 PR、fork 和其他工作流。运行必须结束，且 `build / test` 与对应架构的 package 任务成功；若只是最后 SSH 部署失败，仍可手动拉取已验证的构建。必须存在唯一、未过期、架构匹配的 `deploy-platform-linux-ARCH` 产物，包含 `.run` 与 `.sha256`。GitHub 产物保留期目前三天，过期后需重新构建，不能靠运行编号恢复过期文件。初版按一次至多 100 条任务/产物检查，超出造成目标缺失时拒绝安装。
+每个 dev.json 记录 schema_version、仓库、构建编号、提交 SHA、平台版本、两架构安装包及 cloudctl 的文件名/大小/SHA256。默认发现后再核对固定构建清单；入队时固定构建、版本、提交、架构、文件名、大小、摘要。执行前仅重新核对固定构建，不查询最新，不在失败时选择旧包。清单变化、网络故障或被删除的构建明确失败。
 
-worker 在下载前再次核对运行编号、提交、产物 ID、大小和 GitHub SHA256，使用已有流式下载器和固定版本 ZIP 提取组件。下载后核对包 manifest 的 dev 来源与提交 SHA；旧包缺少来源记录时拒绝安装，需要由新打包流程重新构建 dev。没有 alpha/beta Release 自动选择，也不支持任意下载 URL。
+下载仅允许构造的 GitHub Release HTTPS 地址和许可的 GitHub CDN 重定向，流式写盘并核对已批准大小和 SHA256，再检查内嵌 dev 来源和提交。摘要来自同一可信发布渠道，不是独立发布者签名。dev Release 不自动过期，暂无自动清理；若维护者删除构建，运行编号不能恢复已删除资产。
 
-dev 不增加 API、常驻服务或版本轮询；CLI 原子提交同一个更新队列，执行器继续调用原安装器 `--check`、`--upgrade --skip-apt`。Web 和 CLI 的提交由跨进程锁串行化，安装器节点锁同时覆盖离线包和独立 CI 工具。更新结果包含 channel/run_id/commit，失败不会自动重试。
+dev 不增加 API、常驻服务或版本轮询；CLI 原子提交同一个更新队列，执行器调用原安装器 `--check`、`--upgrade --skip-apt`。Web、CLI 和通知提交由跨进程锁串行化，安装器节点锁覆盖所有升级。更新结果包含 channel/run_id/commit，失败不会自动重试；更新不能降级平台版本，也不能跳过业务探针覆盖。
 
-首次安装与后续升级统一为 cloudctl。首次执行 `cloudctl install --channel dev|stable` 或 `--file`，之后使用 upgrade/upgrade-dev；全部共用下载组件、受保护安装器和任务状态。CI 同样使用平台自带的 cloudctl delivery，不依赖外部工具仓库。详见 [统一首次安装](install.md#统一-cloudctl-首次安装)。
+首次使用 `cloudctl install --channel dev`，后续 `cloudctl upgrade-dev --yes`；均复用下载组件、受保护安装器和任务状态。平台直接验证 GitHub Webhook，持久化入队后按本地策略处理；不需要独立通知服务。详见 [统一首次安装](install.md#统一-cloudctl-首次安装) 和 [CI/CD](ci-cd.md)。

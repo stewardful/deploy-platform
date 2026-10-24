@@ -10,9 +10,8 @@ import subprocess
 import time
 
 import update_worker as worker
-from state import write_record
+from state import write_record, trusted
 from platform_updates import queue
-from ci_state import trusted
 
 CLI_ROOT = Path(__file__).resolve().parent.parent
 
@@ -72,9 +71,9 @@ def main(argv):
     source.add_argument('--file', type=Path, help='Local .run installer')
     source.add_argument('--channel', choices=('stable', 'dev'), help='Download a trusted GitHub build')
     p.add_argument('--version', help='Stable X.Y.Z; default: latest stable Release')
-    p.add_argument('--run-id', help='Dev run; default: latest tested dev artifact')
+    p.add_argument('--run-id', help='Published dev run; default: latest public prerelease')
     p.add_argument('--repository', default='stewardful/deploy-platform')
-    p.add_argument('--token-file', type=Path, help='Absolute private GitHub token file; never a token value')
+    p.add_argument('--token-file', type=Path, help='Stable only: absolute private GitHub token file; never a token value')
     p.add_argument('--no-wait', action='store_true')
     args = p.parse_args(argv)
     if os.geteuid() != 0: raise InstallError('sudo is required')
@@ -84,6 +83,7 @@ def main(argv):
     if args.run_id and args.channel != 'dev' or args.version and args.channel != 'stable': raise InstallError('version/run ID differs from channel')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repository) or '..' in args.repository: raise InstallError('invalid repository')
     if args.token_file:
+        if args.channel != 'stable': raise InstallError('--token-file is only used for stable installs')
         if not args.token_file.is_absolute(): raise InstallError('absolute token path required')
         worker.private_read(args.token_file, 1024)
     preflight()

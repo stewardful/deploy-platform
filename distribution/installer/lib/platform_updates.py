@@ -36,17 +36,33 @@ def main(argv):
     p = argparse.ArgumentParser(prog='cloudctl', allow_abbrev=False)
     sub = p.add_subparsers(dest='command', required=True)
     update = sub.add_parser('update', help='Inspect platform update discovery and execution')
-    update.add_argument('action', choices=('check', 'status'))
+    update.add_argument('action', choices=('check', 'status', 'policy'))
+    update.add_argument('--dev-auto-upgrade', choices=('on', 'off'), help='Local policy only; default is off')
     stable = sub.add_parser('upgrade', help='Queue a checked stable GitHub Release using the existing local API', allow_abbrev=False)
     stable.add_argument('--version', required=True, help='Exact X.Y.Z from update check')
     stable.add_argument('--yes', action='store_true', required=True, help='Explicitly approve this stable version')
     dev = sub.add_parser('upgrade-dev', help='Inspect or queue a dev build; never selects a stable Release', allow_abbrev=False)
-    dev.add_argument('--run-id', help='Exact dev-deploy.yml Actions run ID; default: latest build with successful CI and usable artifact')
+    dev.add_argument('--run-id', help='Exact published dev run ID; default: latest CI-passed public prerelease')
     dev.add_argument('--yes', action='store_true', help='Approve this dev run; otherwise inspect metadata only')
     args = p.parse_args(argv)
     if os.geteuid() != 0: raise ValueError('sudo is required')
     if args.command == 'update':
-        if args.action == 'check':
+        if args.dev_auto_upgrade is not None and args.action != 'policy': raise ValueError('policy option requires update policy')
+        if args.action == 'policy':
+            from notification_updates import policy
+            policy()  # Validate before changing any local configuration.
+            cfg = json.loads(worker.private_read(worker.CONFIG, 4096)) if worker.CONFIG.exists() or worker.CONFIG.is_symlink() else {}
+            section = cfg.get('notifications', {})
+            if not isinstance(section, dict): raise ValueError('invalid local notification configuration')
+            if args.dev_auto_upgrade is not None:
+                if args.dev_auto_upgrade == 'on': section['dev_auto_upgrade'] = True
+                else: section.pop('dev_auto_upgrade', None)
+                if section: cfg['notifications'] = section
+                else: cfg.pop('notifications', None)
+                write_record(worker.CONFIG, cfg)
+            repo, enabled = policy()
+            result = {'repository': repo, 'dev_auto_upgrade': enabled}
+        elif args.action == 'check':
             result = api('/check', {})
             if not result.get('enabled') or result.get('error'): raise ValueError('stable update check unavailable')
         else:

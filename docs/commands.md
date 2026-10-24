@@ -62,7 +62,7 @@ sudo cloudctl system-logs update
 
 先检查，审核返回的候选版本，再显式提交准确版本。`upgrade` 只接受最近检查过的正式 Release，不安装 dev、alpha/beta 或任意 URL。需要控制端运行且配置更新功能；没有正式 Release、凭据无效或缺少产物会失败，不会假装升级成功。任务提交成功只表示排队。
 
-dev 使用独立命令，默认选择最新通过构建和测试、产物可用且架构匹配的 dev 构建，也可以指定 GitHub Actions 运行编号：
+dev 使用独立命令，默认选择最新通过 CI 并公开发布的 dev 构建，也可以指定已发布的构建编号：
 
 ```bash
 # 查看最新可用 dev 构建，不下载、不排队
@@ -75,11 +75,9 @@ sudo cloudctl upgrade-dev --run-id 123456789 --yes
 sudo cloudctl update status
 ```
 
-`upgrade-dev` 最多搜索最近 100 个已结束的 dev 工作流，按构建序号而非重跑完成时间排序。无可用候选时失败；指定 `--run-id` 时不搜索、不回退到其他构建。鉴权、限流、网络或响应损坏会中止搜索。无编号的预览与 `--yes` 是两次独立查询；要批准与预览完全相同的构建，请把返回的 `run_id` 传给 `--run-id`。任务入队后已固定运行编号、提交及产物身份，执行器不会再次选择“最新”。
+`upgrade-dev` 匿名读取公开 `dev-latest/dev.json`，再固定到 `dev-RUN_ID` 预发布并核对清单。指定 --run-id 时不查询 latest、不回退；网络、摘要或清单异常均失败。不再依赖 Actions API/附件或服务器 token。无编号的预览与 --yes 是两次独立查询；要批准相同候选，传回预览的 run_id。入队后固定提交、架构、版本和安装包摘要，执行时不会切换到更新构建。
 
-`upgrade-dev` 直接读取已配置仓库的 GitHub Actions 元数据，不依赖 Go 控制端，下载组件随平台维护。它复用平台更新 path/service，按需执行，无新增常驻服务或轮询。它只更新平台，不更新业务应用镜像。当前没有独立 alpha/beta 发布通道，不用这些名字代指 dev。
-
-私有仓库手动 dev 下载需要服务器凭据对该仓库有 **Actions: read**；正式 Release 读取需要 **Contents: read**。共用 `/etc/deploy-platform/updates.json` 的仓库和私有 token 文件配置，详见 [更新指南](updates.md)。CI 自带临时 GitHub token 不会自动提供给服务器，不能仅凭仓库 URL 下载私有产物。
+它不依赖 Go 控制端，复用平台更新 path/service，按需执行，无新增常驻服务或轮询。只更新平台，不更新业务应用镜像。正式 Release 私有下载可沿用 `/etc/deploy-platform/updates.json` 中的 Contents:read token 配置，公开 dev 路径不读取该 token。详见 [更新指南](updates.md)。
 
 源码、测试、架构、摘要和 dev 构建来源会在执行前重新核对；产物变化要求重新检查。dev 安装允许同版本不同提交；不自动放开数据库兼容限制。正式升级允许同版本 dev 构建切回正式 Release，仍拒绝更旧版本。`update status` 直接读取私有任务记录，在控制端重启时仍可使用；若执行器中断，会标记 interrupted，不自动重试。
 
@@ -98,6 +96,6 @@ sudo cloudctl update status
 独立 Agent 安装不需要 cloudctl、Go 或 Web。日常 cloudctl 应用命令只依赖 agentd 的 Unix Socket 和单写入者任务流程；部署方式见 [独立 Agent](agent.md)、[一键安装](install.md)。
 
 
-首次安装：`cloudctl install --channel dev|stable` 或 `cloudctl install --file INSTALLER.run`，具体获取命令、凭据和成功信号见 [统一首次安装](install.md#统一-cloudctl-首次安装)。首次安装与后续升级是同一 CLI；`install` 不允许覆盖已有平台。CI 控制命令为 `cloudctl delivery`，不是另一个需要安装的工具。
+首次安装：`cloudctl install --channel dev|stable` 或 `cloudctl install --file INSTALLER.run`，具体获取命令、凭据和成功信号见 [统一首次安装](install.md#统一-cloudctl-首次安装)。首次安装与后续升级是同一 CLI；`install` 不允许覆盖已有平台。本地通知策略用 `cloudctl update policy` 管理；通知不会直接执行命令。
 
 候选 dev 构建必须通过 cloudctl 构建、完整测试及对应架构打包；缺少其中任何任务均不接受。
