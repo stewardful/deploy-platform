@@ -120,7 +120,7 @@ class CompatibilityTests(unittest.TestCase):
         baseline.write_text(json.dumps({'rollback_contract': POLICY})); baseline.chmod(0o600)
         (self.root / 'snapshot.json').write_text('[]')
         journal = self.root / 'transaction.json'
-        journal.write_text(json.dumps({'backup': str(self.root), 'previous': '/opt/deploy-platform/releases/old', 'bootstrap_cli': None, 'stage': 'activating', 'active': []}))
+        journal.write_text(json.dumps({'backup': str(self.root), 'previous': '/opt/deploy-platform/releases/old', 'cidr':'10.89.0.0/24', 'stage': 'activating', 'active': []}))
         with patch.object(transaction, 'TRANSACTION', str(journal)), \
              patch.object(transaction, 'BACKUP_ROOT', self.root.parent), \
              patch.object(transaction.subprocess, 'run') as run, \
@@ -138,7 +138,7 @@ class DrainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); (root / 'snapshot.json').write_text('[]')
             journal = root / 'transaction.json'
-            journal.write_text(json.dumps({'backup': str(root), 'previous': '/opt/deploy-platform/releases/old', 'bootstrap_cli': None, 'active': list(transaction.UNITS), 'stage': 'draining'}))
+            journal.write_text(json.dumps({'backup': str(root), 'previous': '/opt/deploy-platform/releases/old', 'cidr':'10.89.0.0/24', 'active': list(transaction.UNITS), 'stage': 'draining'}))
             with patch.object(transaction, 'BACKUP_ROOT', root.parent), patch.object(transaction, 'TRANSACTION', str(journal)), patch.object(transaction, 'cleanup_upgrade'), patch.object(agent_http, 'request') as request, patch.object(transaction.subprocess, 'run') as run:
                 transaction.recover('unused')
                 request.assert_called_once_with('/v1/maintenance/exit', 'POST')
@@ -146,25 +146,15 @@ class DrainTests(unittest.TestCase):
             self.assertFalse(journal.exists())
 
 
-    def test_failed_first_activation_restores_bootstrap_cli_for_diagnostics(self):
+    def test_failed_first_activation_preserves_independent_cli(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp); backup = root/'backup'; backup.mkdir()
-            (backup/'snapshot.json').write_text('[]')
-            bootstrap = root/'bootstrap'/('a'*64)/'cloudctl'; bootstrap.parent.mkdir(parents=True); bootstrap.write_text('CLI')
-            current = root/'current'; current.symlink_to(root/'new-release')
-            launcher = root/'cloudctl'; launcher.symlink_to(current/'cloudctl')
-            journal = root/'transaction.json'
-            journal.write_text(json.dumps({'backup': str(backup), 'previous': None, 'bootstrap_cli': str(bootstrap), 'active': [], 'stage': 'activating', 'cidr': '10.89.0.0/24'}))
-            with patch.object(transaction, 'CURRENT', current), patch.object(transaction, 'LAUNCHER', launcher), \
-                 patch.object(transaction, 'BOOTSTRAP_ROOT', root/'bootstrap'), patch.object(transaction, 'BACKUP_ROOT', root), \
-                 patch.object(transaction, 'RECEIPT', str(root/'receipt')), patch.object(transaction, 'TRANSACTION', str(journal)), \
-                 patch.object(transaction, 'cleanup_upgrade'), patch.object(transaction, 'restore') as restore, \
-                 patch.object(transaction, 'receipt'), patch.object(transaction.subprocess, 'run'):
+            root=Path(temp);backup=root/'backup';backup.mkdir();(backup/'snapshot.json').write_text('[]')
+            cli=root/'cloudctl';cli.write_text('independent CLI')
+            current=root/'current';current.symlink_to(root/'new-release')
+            journal=root/'transaction.json';journal.write_text(json.dumps({'backup':str(backup),'previous':None,'active':[],'stage':'activating','cidr':'10.89.0.0/24'}))
+            with patch.object(transaction,'CURRENT',current),patch.object(transaction,'BACKUP_ROOT',root),patch.object(transaction,'TRANSACTION',str(journal)),patch.object(transaction,'RECEIPT',str(root/'receipt')),patch.object(transaction,'cleanup_upgrade'),patch.object(transaction,'restore'),patch.object(transaction,'receipt'),patch.object(transaction.subprocess,'run'):
                 transaction.recover('unused')
-            self.assertEqual(launcher.readlink(), bootstrap)
-            self.assertFalse(current.is_symlink())
-            self.assertFalse(journal.exists())
-            restore.assert_called_once_with(str(backup))
+            self.assertEqual(cli.read_text(),'independent CLI');self.assertFalse(current.exists())
 
     def test_native_waits_for_accepted_jobs_and_does_not_force_cancel(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(upgrade, 'MARKER', Path(temp) / 'marker'), \
@@ -196,7 +186,7 @@ class DrainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); (root / 'snapshot.json').write_text('[]')
             journal = root / 'transaction.json'
-            journal.write_text(json.dumps({'backup': str(root), 'previous': '/opt/deploy-platform/releases/current', 'bootstrap_cli': None, 'active': [], 'stage': 'draining'}))
+            journal.write_text(json.dumps({'backup': str(root), 'previous': '/opt/deploy-platform/releases/current', 'cidr':'10.89.0.0/24', 'active': [], 'stage': 'draining'}))
             with patch.object(transaction, 'BACKUP_ROOT', root.parent), patch.object(transaction, 'TRANSACTION', str(journal)), \
                  patch.object(agent_http, 'request', side_effect=agent_http.AgentError(404)), \
                  patch.object(transaction, 'cleanup_upgrade') as cleanup:

@@ -21,7 +21,7 @@ cleanup() {
 }
 trap cleanup EXIT
 docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2g --pids-limit=512 \
-    --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,size=2g "cloud-upgrade-test:$UBUNTU_VERSION" >/dev/null
+    --tmpfs /run:exec --tmpfs /run/lock --tmpfs /var/lib/deploy-platform:exec,mode=0700,size=2g "cloud-upgrade-test:$UBUNTU_VERSION" >/dev/null
 docker cp "$OLD" "$NAME:/var/tmp/old.run"
 docker cp "$NEW" "$NAME:/var/tmp/new.run"
 docker cp "$DEMO" "$NAME:/var/tmp/demo.tar"

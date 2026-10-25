@@ -1,10 +1,8 @@
 # 腾讯云 Ubuntu：从安装到前后端、数据库和 HTTPS
 
-本手册的完整演示资料包版本为 0.5.0；当前 0.5.1 的升级流程和必需业务探针见 [升级保障](upgrade.md)。以下步骤适用 0.5.0，Ubuntu 24.04 LTS，2 核 2 GiB，单管理员。先在没有业务数据的测试服务器执行。本教程使用仓库自带的四服务示例：前端转发 `/api` 到后端，后端通过项目服务名连接 PostgreSQL 和 Redis。通过后再换成自己的业务镜像。
+本手册面向当前 dev 的 Ubuntu 24.04/26.04 LTS、2 核 2 GiB、单管理员节点；升级流程与必需业务探针见 [升级保障](upgrade.md)。先在没有业务数据的测试服务器执行。本教程使用仓库自带的四服务示例：前端转发 `/api` 到后端，后端通过项目服务名连接 PostgreSQL 和 Redis。通过后再换成自己的业务镜像。
 
 命令分别标明在“电脑”还是“服务器”执行。`USER`、`SERVER_IP`、`YOUR_DOMAIN` 都是占位符，必须替换成实际值。不要把示例域名拿去申请公网证书。
-
-如果使用配套的 `tencent-acceptance-kit-0.5.0-linux-ARCH.tar.gz`：先在电脑解压并阅读 `开始验证.txt`。它已包含安装包、摘要、同架构示例镜像和 `specs/` 下的四份 JSON，**跳过第 3 步的源码构建命令**，直接上传并导入镜像；第 4 步在网页导入解压目录 `specs/` 中的文件。密钥仍由你自己生成。
 
 ## 1. 准备服务器、域名与文件
 
@@ -25,28 +23,25 @@ sudo ss -lntp
 
 `x86_64` 选 amd64；`aarch64` 选 arm64。已有 Nginx/其他程序占用 80/443 时先协调迁移，不要直接覆盖或停止已有业务。
 
-电脑准备：对应架构的 `.run`、同名 `.sha256`、四服务示例镜像归档和四份应用 JSON。镜像/JSON 的生成见本文第 3 步。
+电脑准备：对应架构的四服务示例镜像归档和四份应用 JSON；平台安装包由服务器自动下载。镜像/JSON 的生成见本文第 3 步。
 
 ## 2. 安装平台并进入网页
 
-**电脑**上传安装包，例如 amd64：
+**服务器**一行安装（需一行入口改动合并并成功发布后执行）：
 
 ```bash
-scp deploy-platform-0.5.0-linux-amd64.run deploy-platform-0.5.0-linux-amd64.sha256 USER@SERVER_IP:~/
+bash -o pipefail -c 'curl -fsSL --connect-timeout 20 --max-time 120 https://github.com/stewardful/deploy-platform/releases/download/dev-latest/install.sh | sudo bash -s -- --channel dev'
 ```
 
-**服务器**在上传目录执行；arm64 改文件名：
+脚本自动校验、安装并检查服务，最终显示 `Installation verified. Local automation policy was preserved (default OFF).`。不需要电脑下载上传、GitHub token 或独立安装工具仓库。同构建会跳过、新构建走保护升级，后续使用 `sudo cloudctl install --channel dev`；失败先查询状态和安装日志，详见 [一行安装与排错](install.md#统一-cloudctl-首次安装)。
 
 ```bash
-sha256sum --check --ignore-missing deploy-platform-0.5.0-linux-amd64.sha256
-bash deploy-platform-0.5.0-linux-amd64.run --check
-sudo bash deploy-platform-0.5.0-linux-amd64.run
 sudo cloudctl status
-sudo systemctl is-active deploy-containerd deploy-agent deploy-control deploy-proxy
+sudo cloudctl version
 sudo cloudctl token
 ```
 
-摘要文件需来自可信来源。已有安装换成 `sudo bash deploy-platform-0.5.0-linux-amd64.run --upgrade`。通过标准：校验成功、verify 输出 PASS、四个服务均 active。token 仅自己保存，不发到聊天或截图。
+成功标准：status 输出 PASS，版本为预期 dev 构建。token 仅自己保存，不发到聊天或截图。
 
 **电脑**新开终端，保持该隧道运行：
 

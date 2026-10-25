@@ -45,15 +45,13 @@ if [[ ! -f /etc/deploy-platform/install.json && -f /var/lib/deploy-platform/agen
     die 'unmanaged Agent database found; use a planned migration, not fresh installation'
 fi
 if [[ -e /usr/local/bin/cloudctl || -L /usr/local/bin/cloudctl ]]; then
-    if [[ ! -L /usr/local/bin/cloudctl || $(readlink /usr/local/bin/cloudctl) != /opt/deploy-platform/current/cloudctl ]]; then
         python3 - "$SOURCE" <<'PYCLI'
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(sys.argv[1])/'lib'))
-from first_install import assert_bootstrap_launcher
-assert_bootstrap_launcher()
+from first_install import assert_cli_launcher
+assert_cli_launcher()
 PYCLI
-    fi
 fi
 if [[ -e /opt/deploy-platform/current || -L /opt/deploy-platform/current ]]; then
     [[ -f /etc/deploy-platform/install.json && -L /opt/deploy-platform/current && $(readlink /opt/deploy-platform/current) == /opt/deploy-platform/releases/* ]] || die 'unmanaged current release path'

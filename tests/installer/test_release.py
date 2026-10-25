@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import shlex
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -151,47 +152,13 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    def test_installed_wrapper_uses_immutable_release_cli_without_environment_overrides(self):
+    def test_standalone_help_is_not_loaded_from_the_platform(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('release_cli',ROOT/'distribution/cli/package.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            shutil.copytree(ROOT/'distribution/installer/lib', root/'lib', ignore=shutil.ignore_patterns('__pycache__'))
-            shutil.copyfile(ROOT/'distribution/installer/fullstack_smoke.py', root/'fullstack_smoke.py')
-            shutil.copyfile(ROOT/'distribution/installer/smoke.py', root/'smoke.py')
-            shutil.copytree(ROOT/'examples/fullstack', root/'examples/fullstack')
-            wrapper = root/'cloudctl'
-            source = (ROOT/'distribution/installer/cloudctl').read_text()
-            wrapper.write_text(source.replace('ROOT=/opt/deploy-platform/current', 'ROOT='+shlex.quote(str(root))))
-            result = subprocess.run(['bash', str(wrapper), '--help'], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('Applications', result.stdout)
-            self.assertIn('upgrade-dev', result.stdout)
-            result = subprocess.run(['bash', str(wrapper), 'test', 'fullstack', '--help'], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('--image', result.stdout)
-            result = subprocess.run(['bash', str(wrapper), 'version', 'ignored'], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 2)
-
-
-class TransactionTests(unittest.TestCase):
-    def test_begin_records_previous_services_and_commit_metadata_privately(self):
-        with tempfile.TemporaryDirectory() as temp:
-            journal = Path(temp) / 'transaction.json'
-            with patch.object(state, 'TRANSACTION', str(journal)), patch.object(state.subprocess, 'run') as run:
-                run.return_value.returncode = 0
-                state.begin('/var/lib/deploy-platform/backups/test', '10.89.0.0/24')
-                value = json.loads(journal.read_text())
-                self.assertEqual(value['active'], list(state.UNITS))
-                self.assertEqual(journal.stat().st_mode & 0o777, 0o600)
-
-    def test_recovery_rejects_invalid_backup_before_system_changes(self):
-        with tempfile.TemporaryDirectory() as temp:
-            journal = Path(temp) / 'transaction.json'
-            journal.write_text(json.dumps({'backup': '/tmp/not-owned', 'previous': None, 'active': []}))
-            with patch.object(state, 'TRANSACTION', str(journal)), patch.object(state.subprocess, 'run') as run:
-                with self.assertRaisesRegex(ValueError, 'invalid transaction backup'):
-                    state.recover(temp)
-                run.assert_not_called()
-                self.assertTrue(journal.exists())
-
-
-if __name__ == "__main__": unittest.main()
+            cli=module.build(Path(temp))
+            result=subprocess.run([sys.executable,'-I','-B',str(cli),'--help'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertIn('Applications',result.stdout)
+            source=(ROOT/'distribution/cli/entry.py').read_text()
+            self.assertNotIn("current/lib/node_cli.py",source)

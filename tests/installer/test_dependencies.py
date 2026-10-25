@@ -89,7 +89,7 @@ class DependencyTests(unittest.TestCase):
         runner = next(self.output.glob('*.run'))
         manifest = archive.installer_manifest(runner)
         self.assertEqual(manifest['build'], {'channel': 'dev', 'commit': 'a'*40})
-        for name in ('node_cli.py', 'platform_updates.py', 'dev_update.py', 'notification_updates.py'):
+        for name in ('node_cli.py', 'platform_updates.py', 'dev_update.py', 'install_policy.py'):
             self.assertIn('lib/'+name, manifest['files'])
         invalid = self.root/'invalid.run'; invalid.write_bytes(b'not a payload')
         with self.assertRaises(ValueError): archive.installer_manifest(invalid)

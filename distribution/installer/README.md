@@ -15,7 +15,7 @@
 | `lib/state.py` / `activate.sh` | 受管理文件快照、事务、激活和失败恢复 |
 | `systemd/` | 一键安装器专用的四服务模板 |
 | `cloudctl` / `lib/node_cli.py` | 统一首次安装、管理和升级命令 |
-| `lib/notification_updates.py` | 本地 dev 开关、已验证构建尝试记录与原升级流程复用 |
+| `lib/install_policy.py` | cloudctl 的本地 dev 授权和持久尝试记录；Webhook 不属于平台 |
 | `lib/dev_update.py` / `dev_manifest.py` | 公开 dev 预发布发现、共享清单契约与固定构建校验 |
 | `lib/first_install.py` | 首次安装的配置/提交/等待，复用更新 worker 与安装器 |
 | `*_smoke.py` / `smoke.py` | 节点健康、普通应用和数据库/四服务验收 |

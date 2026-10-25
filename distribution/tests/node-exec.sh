@@ -16,7 +16,7 @@ node_exec() {
     done
     (( $# >= 2 )) || return 2
     node=$1; shift
-    [[ $node =~ ^cloud-(installer|upgrade|notification)-test-[0-9]+$ ]] || { echo 'disposable test node required' >&2; return 2; }
+    [[ $node =~ ^cloud-(installer|upgrade|bootstrap)-test-[0-9]+$ ]] || { echo 'disposable test node required' >&2; return 2; }
     command docker "${options[@]}" "$node" /bin/sh -ec '
         attempts=0
         until [ -f /sys/fs/cgroup/init.scope/cgroup.procs ]; do

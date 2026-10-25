@@ -46,7 +46,8 @@ class NodeCliTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 2)
 
     def test_version_is_platform_inventory_not_only_agent(self):
-        with tempfile.TemporaryDirectory() as temp, patch.object(cli, 'ROOT', Path(temp)):
+        with tempfile.TemporaryDirectory() as temp, patch.object(cli, 'ROOT', Path(temp)), patch.object(cli, 'CLI_ROOT', Path(temp)):
+            (Path(temp)/'cli.json').write_text(json.dumps({'version':'0.5.3'}))
             (Path(temp)/'manifest.json').write_text(json.dumps({'version': '0.5.3', 'arch': 'amd64', 'package_kind': 'platform-update', 'build': {'channel': 'dev', 'commit': 'a'*40}, 'runtime': {'containerd': '2.4.1', 'archive_url_template': 'not an installed version'}, 'proxy': {'version': '2.11.7'}}))
             with patch.object(cli.subprocess, 'check_output', return_value='agent 0.5.3\n'), contextlib.redirect_stdout(io.StringIO()) as output:
                 cli.main(['version'])
@@ -83,6 +84,8 @@ class NodeCliTests(unittest.TestCase):
                     args = [arg.value for arg in call.args]
                     if args[:1] == ['cloudctl'] and '--keep-running' in args: commands.append(args)
         self.assertEqual(len(commands), 1)
-        result = subprocess.run([sys.executable, '-I', '-B', str(root/'distribution/installer/lib/node_cli.py'), *commands[0][1:], '--help'], capture_output=True, text=True, timeout=15)
+        with patch.object(cli,'ROOT',root/'distribution/installer'),patch.object(cli,'execute') as execute:
+            cli.main([*commands[0][1:],'--help'])
+        result=subprocess.run(execute.call_args.args[0],capture_output=True,text=True,timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('--image', result.stdout)

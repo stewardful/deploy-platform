@@ -95,7 +95,7 @@ if p.is_symlink() or not p.is_file() or stat.S_IMODE(p.stat().st_mode)&0o077 or 
 PY
     ln -s "$destination" /opt/deploy-platform/current.next
     mv -Tf /opt/deploy-platform/current.next /opt/deploy-platform/current
-    ln -sfn /opt/deploy-platform/current/cloudctl /usr/local/bin/cloudctl
+    /usr/bin/python3 -I -B "$SOURCE/cloudctl" setup --if-missing
     python3 "$SOURCE/lib/state.py" receipt --source "$SOURCE" --cidr "$CIDR" --phase activating
     systemctl daemon-reload
     systemctl enable --now deploy-update.path

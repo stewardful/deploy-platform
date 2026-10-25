@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'distribution/ci'))
 spec = importlib.util.spec_from_file_location('dev_release', ROOT/'distribution/ci/dev-release.py')
 release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
+from installer_entry import build as build_entry
 SHA = 'a'*40
 
 
@@ -21,6 +22,7 @@ class DevReleaseTests(unittest.TestCase):
         self.directory = Path(self.temp.name)
         (self.directory/'cloudctl').write_bytes(b'cli')
         (self.directory/'cloudctl.sha256').write_text(hashlib.sha256(b'cli').hexdigest()+'  cloudctl\n')
+        build_entry(self.directory, 'owner/repo', 'dev-42')
         for arch in ('amd64', 'arm64'):
             name = f'deploy-platform-0.5.3-linux-{arch}'
             (self.directory/(name+'.run')).write_bytes(arch.encode())
@@ -39,7 +41,7 @@ class DevReleaseTests(unittest.TestCase):
 
     def test_complete_inventory_both_architectures_and_checksums_required(self):
         value, paths = release.inventory('owner/repo','42',SHA,'0.5.3',self.directory)
-        self.assertEqual(set(value['installers']), {'amd64','arm64'}); self.assertEqual(len(paths),6)
+        self.assertEqual(set(value['installers']), {'amd64','arm64'}); self.assertEqual(len(paths),8)
         (self.directory/'cloudctl.sha256').write_text('bad')
         with self.assertRaises(ValueError): self.invoke()
 
@@ -99,3 +101,9 @@ class DevReleaseTests(unittest.TestCase):
         with patch.object(release,'tag_commit',return_value='b'*40),patch.object(release,'gh') as gh:
             with self.assertRaises(ValueError): self.invoke()
             gh.assert_not_called()
+
+    def test_wrong_entry_never_creates_a_release_or_promotes_latest(self):
+        (self.directory/'install.sh').write_text('unrelated installer')
+        with patch.object(release,'api') as api,patch.object(release,'gh') as gh:
+            with self.assertRaises(ValueError):self.invoke()
+        api.assert_not_called();gh.assert_not_called()

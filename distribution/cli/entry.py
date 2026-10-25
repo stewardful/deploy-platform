@@ -1,4 +1,5 @@
 """Standalone cloudctl entry. The same CLI modules ship in platform releases."""
+import fcntl
 import hashlib
 import io
 import json
@@ -21,9 +22,6 @@ def safe_directory(path):
 
 
 def main():
-    current = Path('/opt/deploy-platform/current/lib/node_cli.py')
-    if current.is_file():
-        os.execv('/usr/bin/python3', ['/usr/bin/python3', '-I', '-B', str(current), *sys.argv[1:]])
     source = Path(sys.argv[0]).read_bytes()
     if len(source) > 4 * 1024**2: raise ValueError('oversized cloudctl')
     with zipfile.ZipFile(io.BytesIO(source)) as bundle:
@@ -40,7 +38,7 @@ def main():
                 raise ValueError('unsafe CLI member')
             data[name] = bundle.read(name)
             if hashlib.sha256(data[name]).hexdigest() != expected: raise ValueError('CLI checksum mismatch')
-    help_args = ([], ['--help'], ['help'], ['version'], ['--version'], ['install', '--help'])
+    help_args = ([], ['--help'], ['help'], ['version'], ['--version'], ['install', '--help'], ['setup', '--help'])
     if os.geteuid() != 0 or sys.argv[1:] in help_args:
         if os.geteuid() != 0 and sys.argv[1:] not in help_args:
             raise ValueError('sudo is required before first installation')
@@ -51,7 +49,7 @@ def main():
             (root/'cli.json').write_text(json.dumps(inventory))
             import subprocess
             raise SystemExit(subprocess.call([sys.executable, '-I', '-B', str(root/'lib/node_cli.py'), *sys.argv[1:]]))
-    root = Path('/opt/deploy-platform/bootstrap') / hashlib.sha256(source).hexdigest()
+    root = Path('/opt/cloudctl/releases') / hashlib.sha256(source).hexdigest()
     safe_directory(root.parent)
     content = {**data, 'cli.json': json.dumps(inventory).encode(), 'cloudctl': source}
     if not root.exists() and not root.is_symlink():
@@ -77,6 +75,25 @@ def main():
         meta = path.lstat()
         if not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_mode & 0o022 or path.read_bytes() != value:
             raise ValueError('immutable CLI bootstrap changed')
+    if sys.argv[1:2] == ['setup']:
+        if sys.argv[2:] not in ([], ['--if-missing']): raise ValueError('unsupported setup option')
+        destination=Path('/usr/local/bin/cloudctl')
+        safe_directory(destination.parent)
+        with (root.parent/'setup.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            if destination.exists() or destination.is_symlink():
+                if not destination.is_symlink():raise ValueError('refusing unrelated cloudctl')
+                target=destination.resolve()
+                if target.name!='cloudctl' or target.parent.parent!=root.parent or len(target.parent.name)!=64:raise ValueError('refusing unrelated cloudctl')
+                meta=target.lstat()
+                if meta.st_uid!=0 or meta.st_mode&0o022 or hashlib.sha256(target.read_bytes()).hexdigest()!=target.parent.name:raise ValueError('untrusted installed CLI')
+                if sys.argv[2:]==['--if-missing']:return
+            temporary=destination.with_name('.cloudctl-'+str(os.getpid()))
+            try:
+                temporary.symlink_to(root/'cloudctl');temporary.replace(destination)
+                descriptor=os.open(destination.parent,os.O_RDONLY);os.fsync(descriptor);os.close(descriptor)
+            finally:temporary.unlink(missing_ok=True)
+        print('cloudctl installed independently: '+str(root));return
     os.execv('/usr/bin/python3', ['/usr/bin/python3', '-I', '-B', str(root/'lib/node_cli.py'), *sys.argv[1:]])
 
 

@@ -12,14 +12,14 @@ from types import SimpleNamespace
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'distribution/installer/lib'))
 import archive
-spec=importlib.util.spec_from_file_location('notification_package',ROOT/'distribution/release/package.py')
+spec=importlib.util.spec_from_file_location('dev_fixture_package',ROOT/'distribution/release/package.py')
 package=importlib.util.module_from_spec(spec);spec.loader.exec_module(package)
 
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('installer',type=Path);parser.add_argument('output',type=Path);args=parser.parse_args()
     manifest=archive.installer_manifest(args.installer)
-    with tempfile.TemporaryDirectory(prefix='notification-fixture-') as directory:
+    with tempfile.TemporaryDirectory(prefix='dev-fixture-') as directory:
         root=Path(directory);stage=root/'stage';stage.mkdir();payload=root/'payload.tar.gz'
         with args.installer.open('rb') as source, payload.open('wb') as target:
             while True:
