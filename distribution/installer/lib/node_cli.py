@@ -6,7 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parent.parent
+CLI_ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path('/opt/deploy-platform/current')
 SOCKET = '/run/deploy-platform/agent.sock'
 AGENT = {
     'apps': 'apps', 'deploy': 'apply', 'start': 'start', 'stop': 'stop',
@@ -19,7 +20,7 @@ GROUPS = {
     'route': {'list': 'routes', 'set': 'route-set', 'delete': 'route-delete'},
 }
 SERVICES = {'agent': 'deploy-agent', 'control': 'deploy-control', 'runtime': 'deploy-containerd',
-            'proxy': 'deploy-proxy', 'update': 'deploy-update', 'install': 'deploy-platform-bootstrap'}
+            'proxy': 'deploy-proxy', 'update': 'deploy-update', 'install': 'cloudctl-install'}
 DESCRIPTION = '''cloudctl — applications and platform maintenance on this node
 
 Applications (Agent API; Go/Web not required):
@@ -38,15 +39,14 @@ Data and domains:
   route list | set | delete    Manage domain routes with revision checks
 
 Node and updates:
-  install --channel stable|dev [--token-file PATH]   First installation
-  install --file INSTALLER.run  First installation from a local package
+  setup                        Install/update this independent cloudctl executable
+  install --channel stable|dev [--run-id ID]   Ensure a verified platform build is installed
+  install --file INSTALLER.run [--yes]   Ensure a local verified package is installed
   status                       Check installed services, runtime, Web and authentication
   agent-health                 Check Agent API and task acceptance only
   version                      Platform release, build and component versions
   system-logs SERVICE          agent | control | runtime | proxy | update
   update check | status | policy   Release discovery / task status / local dev policy
-  upgrade --version X.Y.Z --yes   Queue the checked stable Release
-  upgrade-dev [--run-id ID] [--yes] Latest successful dev build, or a specific run
 
 Advanced:
   token                        Print private Web login token (sudo)
@@ -78,9 +78,10 @@ def parser(name, description):
 
 def version():
     if not (ROOT/'manifest.json').is_file():
-        print(json.dumps({'version': json.loads((ROOT/'cli.json').read_text())['version'], 'installed': False})); return
+        print(json.dumps({'version': json.loads((CLI_ROOT/'cli.json').read_text())['version'], 'installed': False})); return
     manifest = json.loads((ROOT/'manifest.json').read_text())
     result = {key: manifest.get(key) for key in ('version', 'arch', 'package_kind', 'build')}
+    result['cli_version']=json.loads((CLI_ROOT/'cli.json').read_text())['version']
     result['components'] = {}
     for name in ('agentctl', 'agentd'):
         result['components'][name] = subprocess.check_output([str(ROOT/'bin'/name), '--version'], text=True, timeout=5).strip()
@@ -100,6 +101,12 @@ def main(argv=None):
         args = args[1:]+['--help']
     name, rest = args[0], args[1:]
     if name in ('--version',): name = 'version'
+    if name == 'setup':
+        parser(name, 'Register this independently packaged cloudctl; use the released executable').parse_args(rest);return
+    if name == 'worker':
+        if rest or os.geteuid()!=0:raise ValueError('root worker takes no parameters')
+        from update_worker import main as work
+        work();return
     if name == 'install':
         from first_install import main as install, InstallError
         try: install(rest)
@@ -128,7 +135,7 @@ def main(argv=None):
         else:
             agent([GROUPS[name][action], *rest[1:]])
         return
-    if name in ('update', 'upgrade', 'upgrade-dev'):
+    if name == 'update':
         from platform_updates import main as updates
         updates([name, *rest]); return
     if name == 'agentctl': agent(rest); return
@@ -150,7 +157,8 @@ def main(argv=None):
         p = parser(name, 'Read the last 100 journal lines of one platform service. Does not read application logs.')
         p.add_argument('service', choices=SERVICES)
         opts = p.parse_args(rest)
-        execute(['/usr/bin/journalctl', '-u', SERVICES[opts.service]+'.service', '-n', '100', '--no-pager']); return
+        units=['-u','cloudctl-install-*','-u','deploy-update.service'] if opts.service=='install' else ['-u',SERVICES[opts.service]+'.service']
+        execute(['/usr/bin/journalctl',*units,'-n','100','--no-pager']);return
     if name in ('status', 'version', 'token'):
         descriptions = {'status': 'Check the full installed node; requires Agent, control, proxy and runtime.',
                         'version': 'Print installed platform manifest and component versions as JSON; no network access.',

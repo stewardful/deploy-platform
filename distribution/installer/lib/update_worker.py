@@ -19,6 +19,8 @@ import urllib.request
 from urllib.parse import urlsplit
 
 import sys
+# Script execution and imported helpers must share one task/report context.
+if __name__=='__main__':sys.modules['update_worker']=sys.modules[__name__]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from state import write_record
 
@@ -169,7 +171,7 @@ def execute(request):
 
 
 def install_payload(installer, version, *, initial=False, output=None, progress=None):
-    """One installer boundary for first install, stable, dev and notification updates."""
+    """One installer boundary for first install, stable, dev and authorized automatic updates."""
     from archive import installer_manifest
     if installer_manifest(installer).get('version') != version:
         raise ValueError('installer version differs from approved version')
@@ -201,7 +203,18 @@ def initial_stable(version, arch):
 
 
 def report(version, phase, message):
-    write_record(SPOOL / 'result.json', {**ACTIVE_DETAILS, 'version': version, 'phase': phase, 'message': message})
+    value={**ACTIVE_DETAILS,'version':version,'phase':phase,'message':message}
+    write_record(SPOOL/'result.json',value)
+    task=ACTIVE_DETAILS.get('task_id')
+    if task is not None:
+        if not isinstance(task,str) or not re.fullmatch('[a-f0-9]{32}',task):raise ValueError('invalid task identity')
+        directory=SPOOL/'tasks'
+        if directory.is_symlink():raise ValueError('linked task directory')
+        directory.mkdir(mode=0o700,exist_ok=True)
+        write_record(directory/(task+'.json'),value)
+        if phase in ('succeeded','failed','skipped','blocked'):
+            for old in sorted(directory.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)[100:]:old.unlink()
+
 
 
 def main():
@@ -220,16 +233,13 @@ def main():
         try:
             request = json.loads(private_read(active, 4096))
             version = request.get('version', '')
-            ACTIVE_DETAILS = {k: request[k] for k in ('channel', 'run_id', 'commit') if k in request}
+            ACTIVE_DETAILS = {k: request[k] for k in ('channel', 'run_id', 'commit', 'task_id') if k in request}
             report(version, 'checking', '正在确认已批准的版本')
             if request.get('operation') == 'install' and CURRENT.exists():
                 raise ValueError('platform already installed')
-            if request.get('channel') == 'offline' and request.get('operation') == 'install':
+            if request.get('channel') == 'offline':
                 from first_install import execute_offline
                 execute_offline(request)
-            elif request.get('channel') == 'dev-notice':
-                from notification_updates import execute as execute_notice
-                execute_notice(request)
             elif request.get('channel') == 'dev':
                 from dev_update import execute as execute_dev
                 execute_dev(request)

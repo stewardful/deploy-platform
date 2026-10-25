@@ -15,6 +15,7 @@ import installer_entry as entry
 CLI = b'''import json,os,sys
 with open(os.environ['CLI_TRACE'],'a') as out: out.write(json.dumps(sys.argv[1:])+'\\n')
 if os.environ.get('FAIL_AT')==sys.argv[1]: raise SystemExit(3)
+if sys.argv[1]=='install': print(json.dumps({'phase':os.environ.get('INSTALL_PHASE','succeeded')}))
 '''
 
 
@@ -57,8 +58,8 @@ uname(){ printf 'x86_64\\n'; }
     def test_one_command_pins_cli_then_reuses_install_policy_health_and_version(self):
         result=self.call('--channel','dev','--run-id','43')
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(self.calls(),[['install','--channel','dev','--repository','owner/repo','--run-id','43'],
-                                      ['update','policy','--dev-auto-upgrade','off'],['status'],['version']])
+        self.assertEqual(self.calls(),[['setup'],['install','--channel','dev','--repository','owner/repo','--run-id','43'],
+                                      ['status'],['version']])
         download=json.loads((self.root/'curl.log').read_text())
         self.assertEqual(download[-1],'https://github.com/owner/repo/releases/download/dev-42/cloudctl')
         self.assertIn('--max-filesize',download);self.assertNotIn('--insecure',download)
@@ -75,7 +76,7 @@ uname(){ printf 'x86_64\\n'; }
         self.assertEqual(list(self.temporary.iterdir()),[])
 
     def test_existing_or_unsupported_host_never_downloads_or_changes_policy(self):
-        for setup in ['existing_install(){ return 0; }','check_supported_os(){ return 1; }',
+        for setup in ['check_supported_os(){ return 1; }',
                       'uname(){ printf "riscv64\\n"; }','id(){ printf "1000\\n"; }']:
             with self.subTest(setup=setup):
                 result=self.call(setup=setup)
@@ -83,13 +84,13 @@ uname(){ printf 'x86_64\\n'; }
                 self.assertFalse((self.root/'curl.log').exists())
 
     def test_failure_is_not_reported_as_success_or_retried(self):
-        for command in ('install','update','status','version'):
+        for command in ('install','status','version'):
             (self.root/'cli.log').unlink(missing_ok=True)
             result=self.call(env={'FAIL_AT':command})
             self.assertNotEqual(result.returncode,0)
             self.assertNotIn('Installation verified',result.stdout)
             self.assertEqual(sum(call[0]=='install' for call in self.calls()),1)
-            if command=='install':self.assertEqual(len(self.calls()),1)
+            if command=='install':self.assertEqual(len(self.calls()),2)
             self.assertEqual(list(self.temporary.iterdir()),[])
 
     def test_argument_errors_and_help_have_no_host_side_effects(self):
@@ -103,7 +104,7 @@ uname(){ printf 'x86_64\\n'; }
     def test_formal_version_uses_the_same_entry_and_explicit_cli_option(self):
         result=self.call('--channel','stable','--version','1.2.3')
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(self.calls()[0][-2:],['--version','1.2.3'])
+        self.assertEqual(self.calls()[1][-2:],['--version','1.2.3'])
         script=entry.render('owner/repo','v1.2.3',CLI).decode()
         self.assertIn("channel='stable'",script);self.assertIn('/v1.2.3/cloudctl',script)
 
@@ -117,3 +118,12 @@ uname(){ printf 'x86_64\\n'; }
         self.cli.unlink();self.cli.write_bytes(CLI)
         self.script.write_text(self.script.read_text()+'echo extra\n')
         with self.assertRaises(ValueError):entry.verify(self.root,'owner/repo','dev-42')
+
+    def test_cli_only_never_installs_or_calls_platform_api(self):
+        result=self.call('--cli-only')
+        self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(self.calls(),[['setup']])
+
+    def test_confirmation_preview_is_never_reported_as_installed(self):
+        result=self.call('--channel','stable',env={'INSTALL_PHASE':'confirmation_required'})
+        self.assertNotEqual(result.returncode,0);self.assertNotIn('Installation verified',result.stdout)
+        self.assertEqual([c[0] for c in self.calls()],['setup','install'])

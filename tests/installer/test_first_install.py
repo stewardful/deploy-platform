@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+REAL_RUN=subprocess.run
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'distribution/installer/lib'))
 import first_install as first
@@ -70,12 +71,48 @@ class FirstInstallTests(unittest.TestCase):
         self.assertTrue(github.call_args_list[0].args[0].endswith('/latest'))
         self.assertTrue(github.call_args_list[1].args[0].endswith('/tags/v0.5.3'))
 
-    def test_installed_node_is_rejected_without_preflight_or_queue(self):
-        worker.CURRENT.parent.mkdir(); worker.CURRENT.write_text('{}')
-        with self.assertRaisesRegex(ValueError, 'already installed'):
-            first.main(['--channel', 'dev', '--no-wait'])
-        self.preflight.assert_not_called(); self.launch.assert_not_called()
-        self.assertFalse(worker.CONFIG.exists())
+    def test_installed_same_commit_skips_and_new_commit_queues_upgrade(self):
+        worker.CURRENT.parent.mkdir();worker.CURRENT.write_text(json.dumps({'arch':'amd64','version':'0.5.3','build':{'channel':'dev','commit':'a'*40}}))
+        candidate={'channel':'dev','repository':'owner/repo','run_id':'42','commit':'a'*40,'arch':'amd64','version':'0.5.3'}
+        with patch('dev_update.discover',return_value=candidate),contextlib.redirect_stdout(io.StringIO()) as out:first.main(['--channel','dev','--repository','owner/repo','--no-wait'])
+        self.assertEqual(json.loads(out.getvalue())['phase'],'unchanged');self.launch.assert_not_called()
+        candidate['commit']='b'*40
+        with patch('dev_update.discover',return_value=candidate):first.main(['--channel','dev','--repository','owner/repo','--no-wait'])
+        self.assertNotIn('operation',json.loads((worker.SPOOL/'request.json').read_text()))
+
+    def test_automatic_off_and_wrong_commit_never_start_worker(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:first.main(['--channel','dev','--run-id','42','--commit','a'*40,'--automatic'])
+        self.assertEqual(json.loads(out.getvalue())['phase'],'blocked');self.launch.assert_not_called()
+        with patch('dev_update.discover',return_value={'commit':'b'*40}):
+            with self.assertRaisesRegex(ValueError,'not match'):first.main(['--channel','dev','--run-id','42','--commit','a'*40])
+        self.launch.assert_not_called()
+
+    def test_stable_update_requires_confirmation_and_automatic_never_accepts_stable(self):
+        worker.CURRENT.parent.mkdir();worker.CURRENT.write_text(json.dumps({'arch':'amd64','version':'0.5.2','build':{'channel':'stable'}}))
+        candidate={'channel':'stable','version':'0.5.3','repository':'owner/repo'}
+        with patch.object(worker,'initial_stable',return_value=candidate),contextlib.redirect_stdout(io.StringIO()) as out:
+            first.main(['--channel','stable','--repository','owner/repo','--no-wait'])
+        self.assertEqual(json.loads(out.getvalue())['phase'],'confirmation_required');self.launch.assert_not_called()
+        with self.assertRaises(ValueError):first.main(['--channel','stable','--automatic'])
+
+    def test_completed_task_result_survives_another_submission(self):
+        worker.SPOOL.mkdir()
+        from platform_updates import queue
+        request=queue({'channel':'dev','run_id':'42'})
+        worker.ACTIVE_DETAILS={'task_id':request['task_id'],'channel':'dev','run_id':'42'}
+        worker.report('0.5.3','succeeded','done')
+        (worker.SPOOL/'request.json').unlink()
+        second=queue({'channel':'dev','run_id':'43'})
+        self.assertNotEqual(second['task_id'],request['task_id'])
+        self.assertEqual(json.loads((worker.SPOOL/'tasks'/(request['task_id']+'.json')).read_text())['phase'],'succeeded')
+
+    def test_script_and_imported_helpers_share_the_task_receipt_context(self):
+        source=(ROOT/'distribution/installer/lib/update_worker.py').read_text().rsplit("\nif __name__ == '__main__':",1)[0]
+        code="import sys\nfrom pathlib import Path\n__file__="+repr(str(ROOT/'distribution/installer/lib/update_worker.py'))+"\n"+source
+        code+="\nSPOOL=Path("+repr(str(self.root/'script-state'))+")\nSPOOL.mkdir(mode=0o700)\nACTIVE_DETAILS={'task_id':'"+'a'*32+"','channel':'dev'}\nimport dev_update\nassert dev_update.worker is sys.modules['__main__']\ndev_update.worker.report('0.5.3','succeeded','done')\n"
+        result=REAL_RUN([sys.executable,'-I','-B','-c',code],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads((self.root/'script-state/tasks'/('a'*32+'.json')).read_text())['phase'],'succeeded')
 
     def test_bad_inputs_and_public_token_do_not_queue_or_launch(self):
         token = self.root/'token'; token.write_text('not-private'); token.chmod(0o644)
@@ -92,7 +129,7 @@ class FirstInstallTests(unittest.TestCase):
 
     def test_offline_install_requires_commit_before_reporting_success(self):
         worker.SPOOL.mkdir(); source = worker.SPOOL/'first-install.run'; source.write_bytes(b'payload'); source.chmod(0o600)
-        request = {'digest': hashlib.sha256(b'payload').hexdigest(), 'version': '0.5.3', 'arch': 'amd64', 'build': None}
+        request = {'operation':'install','digest': hashlib.sha256(b'payload').hexdigest(), 'version': '0.5.3', 'arch': 'amd64', 'build': None}
         def install(*args, **kwargs):
             worker.CURRENT.parent.mkdir(exist_ok=True); worker.CURRENT.write_text(json.dumps({'version': '0.5.3', 'arch': 'amd64'}))
         with patch.object(first, 'trusted'), patch.object(worker, 'install_payload', side_effect=install) as run:

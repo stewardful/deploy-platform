@@ -55,11 +55,6 @@ jobs:
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}
         run: bash distribution/tests/ubuntu-smoke.sh "$GITHUB_WORKSPACE"/offline/deploy-platform-*-linux-amd64.run
-      - name: Verify signed Webhooks and protected dev automatic upgrades
-        if: matrix.ubuntu == '26.04'
-        env:
-          UBUNTU_VERSION: ${{ matrix.ubuntu }}
-        run: bash distribution/tests/notification-smoke.sh "$GITHUB_WORKSPACE"/offline/deploy-platform-*-linux-amd64.run "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run
       - uses: actions/setup-go@v6
         if: matrix.ubuntu == '26.04'
         with:

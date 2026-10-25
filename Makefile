@@ -67,10 +67,10 @@ installer-test:
 	$(MAKE) installer-check
 
 installer-check:
-	bash -n distribution/cli/install.sh.in distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
+	bash -n distribution/cli/install.sh.in distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
 
 shellcheck:
-	shellcheck -x distribution/cli/install.sh.in distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/cloudctl distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
+	shellcheck -x distribution/cli/install.sh.in distribution/installer/bootstrap.sh.in distribution/installer/install.sh distribution/installer/lib/*.sh distribution/release/build.sh distribution/ci/*.sh distribution/tests/*-smoke.sh distribution/tests/node-exec.sh
 
 # Run on a native Linux build machine. Target servers receive only the resulting .run.
 release-build:

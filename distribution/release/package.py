@@ -59,9 +59,14 @@ def package(args):
             proxy_subset(Path(args.proxy_archive or ROOT / ('target/release-cache/caddy_2.11.7_linux_'+args.arch+'.tar.gz')),stage/'proxy',args.arch, json.loads((ROOT/'distribution/release/proxy.lock.json').read_text()))
         shutil.copytree(ROOT / "distribution/installer/lib", stage / "lib", ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copyfile(ROOT / "crates/ingress/bootstrap.json", stage / "lib/proxy-bootstrap.json")
-        for name in ("install.sh", "cloudctl", "smoke.py", "stateful_smoke.py", "fullstack_smoke.py"):
+        for name in ("install.sh", "smoke.py", "stateful_smoke.py", "fullstack_smoke.py"):
             shutil.copyfile(ROOT / "distribution/installer" / name, stage / name)
             (stage / name).chmod(0o755)
+        import importlib.util
+        cli_spec=importlib.util.spec_from_file_location('platform_cli_package',ROOT/'distribution/cli/package.py')
+        cli_package=importlib.util.module_from_spec(cli_spec);cli_spec.loader.exec_module(cli_package)
+        cli_package.build(stage)
+        (stage/'cloudctl.sha256').unlink()
         shutil.copytree(ROOT / "distribution/installer/systemd", stage / "systemd")
         shutil.copytree(ROOT / "examples", stage / "examples", ignore=shutil.ignore_patterns("go-client", "__pycache__"))
         shutil.copyfile(ROOT / "distribution/release/runtime.lock.json", stage / "runtime.lock.json")

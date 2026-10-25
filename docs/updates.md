@@ -4,7 +4,7 @@
 
 ## 发布版本
 
-日常推送默认分支 `dev` 自动更新测试机；正式代码推送 `main` 后，由 [发布工作流](../.github/workflows/release.yml) 自动测试、构建两种架构、创建固定到 main 提交的版本标签并发布 GitHub Release。无需手动推送标签。完整 Secrets 配置及分支约定见 [CI/CD](ci-cd.md)。
+日常推送默认分支 `dev` 发布预发布包；测试机须独立安装 deploy-webhook 并开启 cloudctl 本地自动更新开关，才会接收通知更新；正式代码推送 `main` 后，由 [发布工作流](../.github/workflows/release.yml) 自动测试、构建两种架构、创建固定到 main 提交的版本标签并发布 GitHub Release。无需手动推送标签。完整 Secrets 配置及分支约定见 [CI/CD](ci-cd.md)。
 
 每次正式发布需提升源码版本，Rust workspace、内部组件和 Cargo.lock 保持一致。同一版本不能指向其他提交；同一提交重跑可继续草稿，已经公开的资产不会覆盖。手动触发发布也必须选择 main 分支。
 
@@ -12,7 +12,7 @@
 
 ## 服务器配置
 
-默认检查 `stewardful/deploy-platform` 的最新正式 GitHub Release，在控制端启动约十秒后补查，已验签 Webhook 发布通知触发检查。手动检查至少间隔一分钟，包括失败请求，防止耗尽 GitHub 配额。页面每三十秒查询本地状态，有升级任务时每五秒查询；隐藏标签页暂停查询。
+默认检查 `stewardful/deploy-platform` 的最新正式 GitHub Release，在控制端启动约十秒后补查；平台不接收 Webhook。手动检查至少间隔一分钟，包括失败请求，防止耗尽 GitHub 配额。页面每三十秒查询本地状态，有升级任务时每五秒查询；隐藏标签页暂停查询。
 
 公共仓库无需凭据。私有仓库需要管理员创建仅允许该仓库 **Contents: read** 的 GitHub fine-grained token，写入服务器 `/etc/deploy-platform/github.token`，权限为 `0600`，不要放在源码、Shell 历史或网页中。再创建：
 
@@ -70,7 +70,7 @@ sudo cat /var/lib/deploy-platform/updates/result.json
 
 命令行正式升级复用上述 API 和 worker：`cloudctl update check` 后显式运行 `cloudctl upgrade --version X.Y.Z --yes`。查询执行结果用 `cloudctl update status`，该查询不依赖正在重启的控制端。应用操作、平台升级和业务应用发布的边界见 [命令指南](commands.md)。
 
-`cloudctl upgrade-dev` 默认读取公开 `dev-latest/dev.json`，只预览；`cloudctl upgrade-dev --yes` 选择并提交最新已发布候选。`--run-id RUN_ID` 固定到 `dev-RUN_ID` 预发布。无需服务器 token，不读取 Actions API，也不保留旧 Actions 产物筛选路径。公开源码不能让 Actions 附件匿名下载，服务器分发使用公开 Release 附件。
+`cloudctl install --channel dev` 发现公开 dev-latest 并固定到 dev-RUN_ID。--run-id 指定固定构建，--commit 核对预期提交；同构建跳过、新构建执行保护升级，不依赖平台 Web/Go API。公开下载不需要服务器 token。
 
 发布工作流在测试、cloudctl 和两架构打包均通过后，先以草稿上传完整资产，再公开固定构建。固定标签指向 dev 事件提交，不覆盖已发布资产；较旧源码完成或旧运行重跑不会把最新指针回退。未成功发布的构建不会成为候选；预发布不会成为正式版 latest。
 
@@ -80,4 +80,4 @@ sudo cat /var/lib/deploy-platform/updates/result.json
 
 dev 不增加 API、常驻服务或版本轮询；CLI 原子提交同一个更新队列，执行器调用原安装器 `--check`、`--upgrade --skip-apt`。Web、CLI 和通知提交由跨进程锁串行化，安装器节点锁覆盖所有升级。更新结果包含 channel/run_id/commit，失败不会自动重试；更新不能降级平台版本，也不能跳过业务探针覆盖。
 
-首次使用 `cloudctl install --channel dev`，后续 `cloudctl upgrade-dev --yes`；均复用下载组件、受保护安装器和任务状态。平台直接验证 GitHub Webhook，持久化入队后按本地策略处理；不需要独立通知服务。详见 [统一首次安装](install.md#统一-cloudctl-首次安装) 和 [CI/CD](ci-cd.md)。
+首次使用 `cloudctl install --channel dev`，后续 `cloudctl install --channel dev`；均复用下载组件、受保护安装器和任务状态。deploy-webhook 独立验签并调用 cloudctl install；平台仅负责管理项目和手动正式升级。详见 [统一首次安装](install.md#统一-cloudctl-首次安装) 和 [CI/CD](ci-cd.md)。

@@ -20,8 +20,6 @@ FILES = [
     "/etc/sysctl.d/90-deploy-platform.conf", "/etc/modules-load.d/deploy-platform.conf"
 ]
 CURRENT = Path('/opt/deploy-platform/current')
-LAUNCHER = Path('/usr/local/bin/cloudctl')
-BOOTSTRAP_ROOT = Path('/opt/deploy-platform/bootstrap')
 RECEIPT = "/etc/deploy-platform/install.json"
 TRANSACTION = "/var/lib/deploy-platform/install-transaction.json"
 BACKUP_ROOT = Path("/var/lib/deploy-platform/backups")
@@ -48,9 +46,7 @@ def write_record(path, value):
 
 def begin(destination, cidr):
     current = CURRENT
-    launcher = LAUNCHER
-    bootstrap_cli = str(launcher.readlink()) if launcher.is_symlink() and launcher.resolve().parent.parent == BOOTSTRAP_ROOT else None
-    value = {"bootstrap_cli": bootstrap_cli, "backup": destination, "cidr": cidr,
+    value = {"backup": destination, "cidr": cidr,
              "previous": str(current.readlink()) if current.is_symlink() else None,
              "stage": "draining" if current.is_symlink() else "activating",
              "active": [u for u in UNITS if subprocess.run(['systemctl', 'is-active', '--quiet', u]).returncode == 0]}
@@ -66,6 +62,7 @@ def recover(source):
     if path.is_symlink():
         raise ValueError('transaction cannot be a symlink')
     value = json.loads(path.read_text())
+    if set(value)!={'backup','cidr','previous','stage','active'}:raise ValueError('unsupported installation transaction')
     backup = Path(value['backup'])
     previous = value['previous']
     if backup.parent != BACKUP_ROOT or not (backup / 'snapshot.json').is_file():
@@ -74,11 +71,6 @@ def recover(source):
         raise ValueError('invalid previous release')
     if any(u not in UNITS for u in value['active']):
         raise ValueError('invalid transaction service')
-    bootstrap = value['bootstrap_cli']
-    if bootstrap is not None:
-        target = Path(bootstrap)
-        if target.parent.parent != BOOTSTRAP_ROOT or target.name != 'cloudctl' or not re.fullmatch('[a-f0-9]{64}', target.parent.name):
-            raise ValueError('invalid bootstrap CLI recovery target')
     if value['stage'] not in ('draining', 'activating'):
         raise ValueError('invalid installation transaction stage')
     if value['stage'] == 'draining':
@@ -118,10 +110,6 @@ def recover(source):
         temporary.replace(current)
     else:
         if current.is_symlink(): current.unlink()
-        launcher = LAUNCHER
-        if value['bootstrap_cli']:
-            launcher.unlink(missing_ok=True)
-            launcher.symlink_to(value['bootstrap_cli'])
         Path(RECEIPT).parent.mkdir(parents=True, exist_ok=True)
         receipt(source, value['cidr'], 'failed')
     # A failed first installation of update support must leave no enabled watcher.

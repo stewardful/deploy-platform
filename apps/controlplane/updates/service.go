@@ -41,22 +41,17 @@ type Execution struct {
 	Message string `json:"message"`
 }
 type Status struct {
-	Enabled       bool               `json:"enabled"`
-	Current       string             `json:"current"`
-	Candidate     *Candidate         `json:"candidate"`
-	CheckedAt     string             `json:"checked_at"`
-	Error         string             `json:"error"`
-	Execution     *Execution         `json:"execution"`
-	Notifications NotificationStatus `json:"notifications"`
-}
-type NotificationSettings struct {
-	SecretFile     string `json:"secret_file"`
-	DevAutoUpgrade bool   `json:"dev_auto_upgrade"`
+	Enabled   bool       `json:"enabled"`
+	Current   string     `json:"current"`
+	Candidate *Candidate `json:"candidate"`
+	CheckedAt string     `json:"checked_at"`
+	Error     string     `json:"error"`
+	Execution *Execution `json:"execution"`
 }
 type Settings struct {
-	Notifications NotificationSettings `json:"notifications"`
-	Repository    string               `json:"repository"`
-	TokenFile     string               `json:"token_file"`
+	DevAutoUpgrade bool   `json:"dev_auto_upgrade"`
+	Repository     string `json:"repository"`
+	TokenFile      string `json:"token_file"`
 }
 type Service struct {
 	mu                                         sync.Mutex
@@ -65,7 +60,6 @@ type Service struct {
 	now                                        func() time.Time
 	last                                       time.Time
 	status                                     Status
-	wake                                       chan struct{}
 }
 
 func New(dir, manifest, config string) (*Service, error) {
@@ -87,7 +81,7 @@ func New(dir, manifest, config string) (*Service, error) {
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("updates directory must be a private directory")
 	}
-	return &Service{dir: dir, current: release.Version, currentChannel: release.Build.Channel, arch: release.Arch, config: config, now: time.Now, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, wake: make(chan struct{}, 1), status: Status{Enabled: true, Current: release.Version}}, nil
+	return &Service{dir: dir, current: release.Version, currentChannel: release.Build.Channel, arch: release.Arch, config: config, now: time.Now, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, status: Status{Enabled: true, Current: release.Version}}, nil
 }
 
 func privateRead(path string, limit int64) ([]byte, error) {
@@ -112,7 +106,7 @@ func privateRead(path string, limit int64) ([]byte, error) {
 }
 func (s *Service) settings() (Settings, string, error) { return s.loadSettings(true) }
 func (s *Service) loadSettings(readToken bool) (Settings, string, error) {
-	cfg := Settings{Repository: "stewardful/deploy-platform", Notifications: NotificationSettings{SecretFile: "/etc/deploy-platform/webhook.secret"}}
+	cfg := Settings{Repository: "stewardful/deploy-platform"}
 	if _, err := os.Lstat(s.config); !os.IsNotExist(err) {
 		data, err := privateRead(s.config, 4096)
 		decoder := json.NewDecoder(strings.NewReader(string(data)))
@@ -121,7 +115,7 @@ func (s *Service) loadSettings(readToken bool) (Settings, string, error) {
 			return cfg, "", ErrUnavailable
 		}
 	}
-	if !repository.MatchString(cfg.Repository) || strings.Contains(cfg.Repository, "..") || cfg.Notifications.SecretFile != "" && !filepath.IsAbs(cfg.Notifications.SecretFile) {
+	if !repository.MatchString(cfg.Repository) || strings.Contains(cfg.Repository, "..") {
 		return cfg, "", ErrUnavailable
 	}
 	token := ""
@@ -159,7 +153,6 @@ func newer(a, b string) bool {
 }
 func (s *Service) snapshot() Status {
 	value := s.status
-	value.Notifications.LastAttempt, _ = s.lastAttempt("")
 	for _, name := range []string{"active.json", "request.json", "result.json"} {
 		data, err := privateRead(filepath.Join(s.dir, name), 4096)
 		if err != nil {
@@ -176,7 +169,7 @@ func (s *Service) snapshot() Status {
 		if name == "active.json" {
 			result, err := privateRead(filepath.Join(s.dir, "result.json"), 4096)
 			var progress Execution
-			if err == nil && json.Unmarshal(result, &progress) == nil && (progress.Version == e.Version || e.Channel == "dev" || e.Channel == "dev-notice") && progress.Channel == e.Channel && progress.RunID == e.RunID {
+			if err == nil && json.Unmarshal(result, &progress) == nil && (progress.Version == e.Version || e.Channel == "dev") && progress.Channel == e.Channel && progress.RunID == e.RunID {
 				e = progress
 			}
 			lock, err := os.OpenFile(filepath.Join(s.dir, "worker.lock"), os.O_RDWR, 0600)
@@ -202,7 +195,7 @@ func (s *Service) Status() Status { s.mu.Lock(); defer s.mu.Unlock(); return s.s
 func (s *Service) Check(ctx context.Context) (Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Bound authenticated manual refreshes and notification-triggered checks, including failures.
+	// Bound authenticated manual refreshes and startup checks, including failures.
 	if !s.last.IsZero() && s.now().Sub(s.last) < time.Minute {
 		return s.snapshot(), nil
 	}
@@ -302,7 +295,7 @@ func (s *Service) Upgrade(version string) (Status, error) {
 	return s.snapshot(), err
 }
 
-// publishRequest is the one Go submission boundary for manual and notification requests.
+// publishRequest is the one Go submission boundary for manual Web requests.
 // Python CLI shares its submission.lock and the same independent worker/installer.
 func (s *Service) publishRequest(request any) error {
 	lock, err := os.OpenFile(filepath.Join(s.dir, "submission.lock"), os.O_CREATE|os.O_RDWR, 0600)
@@ -350,4 +343,16 @@ func (s *Service) publishRequest(request any) error {
 		return err
 	}
 	return nil
+}
+
+// Run supplements the manual stable discovery once at startup. No webhook or version polling.
+func (s *Service) Run(ctx context.Context) {
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+		_, _ = s.Check(ctx)
+	}
 }

@@ -9,13 +9,6 @@ test('new release is shown and upgrade requires explicit confirmation; reconnect
     enabled: true,
     current: '0.5.1',
     candidate: { version: '0.5.2', asset_id: 12, size: 42, digest: 'sha256:' + 'a'.repeat(64) },
-    notifications: {
-      enabled: true,
-      dev_auto_upgrade: false,
-      dev_tag: 'dev-42',
-      error: '',
-      last_attempt: null,
-    },
     checked_at: new Date().toISOString(),
     error: '',
     execution: null as null | { version: string; phase: string; message: string },
@@ -36,9 +29,6 @@ test('new release is shown and upgrade requires explicit confirmation; reconnect
   await page.getByRole('textbox', { name: '管理令牌' }).fill(token!);
   await page.getByRole('button', { name: '进入工作台' }).click();
   await expect(page.getByText('发现新版本 0.5.2')).toBeVisible();
-  await expect(page.getByText(/dev 自动升级：关闭/)).toBeVisible();
-  await expect(page.getByText(/已配置 Webhook/)).toBeVisible();
-  await expect(page.getByText(/收到 dev-42 通知/)).toBeVisible();
   expect(submissions).toBe(0);
   await page.getByRole('button', { name: '升级到 0.5.2' }).click();
   const dialog = page.getByRole('dialog', { name: '升级平台' });

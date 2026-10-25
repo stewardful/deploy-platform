@@ -37,6 +37,8 @@ def main():
     if not Path('/run/cloud-upgrade-isolated-test').is_file() or Path('/etc/deploy-platform/install.json').exists():
         raise RuntimeError('requires a fresh, explicitly marked disposable node')
     system('bash', '/var/tmp/old.run', '--skip-apt')
+    launcher = Path('/usr/local/bin/cloudctl').resolve()
+    if launcher.parent.parent != Path('/opt/cloudctl/releases'): raise RuntimeError('CLI is not independent')
     sys.path.insert(0, '/opt/deploy-platform/current')
     from smoke import request, runtime, wait_ready
     runtime('load', '-i', '/var/tmp/demo.tar')
@@ -123,7 +125,8 @@ if flag.exists() and json.loads(Path('/etc/deploy-platform/install.json').read_t
     # Normal same-release installation now exercises the native maintenance API.
     system('bash', '/var/tmp/new.run', '--skip-apt', '--drain-seconds', '30', '--verify-seconds', '40')
     if read() != before: raise RuntimeError('native maintenance reinstall changed data')
-    print('PASS: native drain/reinstall, trusted HTTPS and unchanged persisted records', flush=True)
+    if Path('/usr/local/bin/cloudctl').resolve() != launcher: raise RuntimeError('platform upgrade replaced independent CLI')
+    print('PASS: native drain/reinstall, trusted HTTPS, independent CLI retained and unchanged persisted records', flush=True)
 
 
 if __name__ == '__main__': main()

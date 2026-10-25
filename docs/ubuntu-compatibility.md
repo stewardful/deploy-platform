@@ -26,8 +26,6 @@ UBUNTU_VERSION=24.04 bash distribution/tests/upgrade-smoke.sh /ABS/deploy-platfo
 # 一行首次安装：CLI 同目录有 install.sh 与校验；需要当前构建的公开入口契约
 UBUNTU_VERSION=26.04 bash distribution/tests/bootstrap-smoke.sh /ABS/dev/deploy-platform-0.5.3-linux-arm64.run /ABS/cloudctl
 
-# 签名 Webhook、默认关闭、dev 自动升级、错误来源拒绝与重启去重
-UBUNTU_VERSION=26.04 bash distribution/tests/notification-smoke.sh /ABS/offline/deploy-platform-0.5.3-linux-arm64.run /ABS/dev/deploy-platform-0.5.3-linux-arm64.run
 ```
 
 `upgrade-demo.tar` 必须包含与节点架构一致、标记为 `cloud-fullstack-demo:upgrade-check` 的验收镜像。HTTPS 使用隔离测试 CA，覆盖前端、后端、PostgreSQL、Redis、业务数据保留、缺少探针时提前拒绝、注入后端故障后回退及正常重装。测试不会连接腾讯云服务器。

@@ -52,8 +52,26 @@ def discover(run_id=None, *, initial=False):
 def execute(request, *, before_install=None):
     initial = request.get('operation') == 'install'
     fresh = discover(request['run_id'], initial=initial)
-    if fresh != {k: v for k, v in request.items() if k not in ('phase', 'operation')}:
+    if fresh != {k: v for k, v in request.items() if k not in ('phase', 'operation','task_id','automatic')}:
         raise ValueError('dev build changed after approval; inspect again')
+    automatic=request.get('automatic',False)
+    if type(automatic) is not bool:raise ValueError('invalid automatic install flag')
+    if automatic:
+        from install_policy import guard,receipt,record
+        guard(request['repository'])
+        old=receipt(request['repository'])
+        if old is not None and int(request['run_id'])<=int(old['run_id']):
+            worker.report(request['version'],'skipped','该自动构建已尝试，不重复执行');return
+        record(request['repository'],request['run_id'],'attempted')
+    try:
+        perform(request,initial,automatic,before_install)
+        if automatic:record(request['repository'],request['run_id'],'succeeded')
+    except Exception:
+        if automatic:record(request['repository'],request['run_id'],'failed')
+        raise
+
+
+def perform(request,initial,automatic,before_install):
     worker.report(request['version'], 'downloading', '正在下载并校验 dev 构建；应用继续运行')
     with tempfile.TemporaryDirectory(prefix='cloud-dev-update-', dir=worker.DOWNLOAD_ROOT) as directory:
         installer = Path(directory)/'installer.run'
@@ -64,6 +82,9 @@ def execute(request, *, before_install=None):
         if (candidate.get('package_kind') != 'platform-update' or candidate.get('version') != request['version'] or candidate.get('arch') != request['arch'] or
                 candidate.get('build') != {'channel': 'dev', 'commit': request['commit']}):
             raise ValueError('installer build provenance mismatch')
+        if automatic:
+            from install_policy import guard
+            guard(request['repository'])
         if before_install is not None: before_install()
         worker.install_payload(installer, request['version'], initial=initial)
     installed = json.loads(worker.CURRENT.read_text())

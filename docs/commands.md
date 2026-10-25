@@ -47,35 +47,32 @@ sudo cloudctl route delete --domain app.your-domain.com --expected-revision 1
 | `system-logs SERVICE` | 指定 agent/control/runtime/proxy/update 服务最近 100 行日志 |
 | `version` / `--version` | JSON：平台版本、架构、包类型、构建来源及组件版本；不访问网络 |
 
-`logs` 不再默认读取 Agent 系统日志；必须明确指定应用。系统日志必须显式指定服务。`version` 中 Agent 版本来自二进制，控制端版本来自已安装包 manifest，运行时/代理版本来自安装锁定清单；它不是业务容器镜像清单。旧包没有构建来源时 `build` 为 null。
+`logs` 不再默认读取 Agent 系统日志；必须明确指定应用。系统日志必须显式指定服务。`version` 中 Agent 版本来自二进制，控制端版本来自已安装包 manifest，运行时/代理版本来自安装锁定清单；它不是业务容器镜像清单。未安装平台时返回 installed=false 和 CLI 自身版本。
 
 ## 正式升级与 dev 更新
 
-正式版使用已经存在的管理 API：
+正式版通过独立 CLI 检查并明确确认安装：
 
 ```bash
 sudo cloudctl update check
-sudo cloudctl upgrade --version 0.5.4 --yes
+sudo cloudctl install --channel stable --version 0.5.4 --yes
 sudo cloudctl update status
 sudo cloudctl system-logs update
 ```
 
-先检查，审核返回的候选版本，再显式提交准确版本。`upgrade` 只接受最近检查过的正式 Release，不安装 dev、alpha/beta 或任意 URL。需要控制端运行且配置更新功能；没有正式 Release、凭据无效或缺少产物会失败，不会假装升级成功。任务提交成功只表示排队。
+先检查，审核返回的候选版本，再用 --version 和 --yes 明确确认。CLI 不依赖控制端；网页仍使用已有管理 API。没有正式 Release、凭据无效或缺少产物会失败。
 
-dev 使用独立命令，默认选择最新通过 CI 并公开发布的 dev 构建，也可以指定已发布的构建编号：
+dev 默认选择最新通过 CI 并公开发布的构建，也可以指定已发布的构建编号：
 
 ```bash
-# 查看最新可用 dev 构建，不下载、不排队
-sudo cloudctl upgrade-dev
-# 选择并提交当前最新可用构建
-sudo cloudctl upgrade-dev --yes
-# 指定构建；也适用于审核后锁定预览中返回的运行编号
-sudo cloudctl upgrade-dev --run-id 123456789
-sudo cloudctl upgrade-dev --run-id 123456789 --yes
+# 确保最新公开 dev 构建已安装；默认等待任务结束
+sudo cloudctl install --channel dev
+# 固定构建，提交后通过 update status 查询
+sudo cloudctl install --channel dev --run-id 123456789 --no-wait
 sudo cloudctl update status
 ```
 
-`upgrade-dev` 匿名读取公开 `dev-latest/dev.json`，再固定到 `dev-RUN_ID` 预发布并核对清单。指定 --run-id 时不查询 latest、不回退；网络、摘要或清单异常均失败。不再依赖 Actions API/附件或服务器 token。无编号的预览与 --yes 是两次独立查询；要批准相同候选，传回预览的 run_id。入队后固定提交、架构、版本和安装包摘要，执行时不会切换到更新构建。
+`cloudctl install --channel dev` 发现最新公开构建并固定清单；指定 --run-id 则只查询固定构建。--commit 绑定预期完整 SHA。已有同构建返回 unchanged，新构建复用保护升级；正式或本地更新要求 --yes。--automatic 只供固定 dev 构建，并要求本地开关授权。
 
 它不依赖 Go 控制端，复用平台更新 path/service，按需执行，无新增常驻服务或轮询。只更新平台，不更新业务应用镜像。正式 Release 私有下载可沿用 `/etc/deploy-platform/updates.json` 中的 Contents:read token 配置，公开 dev 路径不读取该 token。详见 [更新指南](updates.md)。
 
@@ -96,6 +93,8 @@ sudo cloudctl update status
 独立 Agent 安装不需要 cloudctl、Go 或 Web。日常 cloudctl 应用命令只依赖 agentd 的 Unix Socket 和单写入者任务流程；部署方式见 [独立 Agent](agent.md)、[一键安装](install.md)。
 
 
-首次安装默认使用 [一行安装入口](install.md#统一-cloudctl-首次安装)，内部复用 `cloudctl install --channel dev|stable` 或 `cloudctl install --file INSTALLER.run`，具体获取命令、凭据和成功信号见 [统一首次安装](install.md#统一-cloudctl-首次安装)。首次安装与后续升级是同一 CLI；`install` 不允许覆盖已有平台。本地通知策略用 `cloudctl update policy` 管理；通知不会直接执行命令。
+首次安装默认使用 [一行安装入口](install.md#统一-cloudctl-首次安装)，内部复用 `cloudctl install --channel dev|stable` 或 `cloudctl install --file INSTALLER.run`，具体获取命令、凭据和成功信号见 [统一首次安装](install.md#统一-cloudctl-首次安装)。首次安装与后续升级使用同一 CLI；`install` 对同构建跳过，对新构建执行保护升级。本地通知策略用 `cloudctl update policy` 管理；Webhook 只触发固定安装命令，平台不接收通知。
 
 候选 dev 构建必须通过 cloudctl 构建、完整测试及对应架构打包；缺少其中任何任务均不接受。
+
+cloudctl 由本 monorepo 独立打包，`setup` 注册到 `/usr/local/bin/cloudctl`；安装缓存为 `/opt/cloudctl/releases`。`install --automatic` 只允许固定 dev run+commit，并由本地开关授权。通知服务见 [deploy-webhook](https://github.com/stewardful/deploy-webhook)，平台没有 Webhook API。旧 upgrade/upgrade-dev 命令已移除，无别名。

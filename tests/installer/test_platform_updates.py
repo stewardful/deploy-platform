@@ -116,18 +116,10 @@ class PlatformUpdateTests(unittest.TestCase):
         for repo, tag, name in [('owner/../repo','dev-42','a'), ('owner/repo','main','a'), ('owner/repo','dev-42','../a')]:
             with self.assertRaises(ValueError): dev.asset_url(repo, tag, name)
 
-    def test_preview_and_queue_pin_identity_clear_old_result_and_refuse_overlap(self):
-        with patch.object(cli.os, 'geteuid', return_value=0), contextlib.redirect_stdout(io.StringIO()) as out:
-            cli.main(['upgrade-dev'])
-        checked = json.loads(out.getvalue())
-        self.assertEqual(checked['phase'], 'checked'); self.assertFalse((self.root/'request.json').exists())
-        (self.root/'result.json').write_text('{"phase":"succeeded"}')
-        with patch.object(cli.os, 'geteuid', return_value=0), contextlib.redirect_stdout(io.StringIO()): cli.main(['upgrade-dev', '--yes'])
-        self.assertFalse((self.root/'result.json').exists())
-        self.assertEqual((self.root/'request.json').stat().st_mode & 0o777, 0o600)
-        with self.assertRaises(ValueError): cli.queue(dev.discover('42'))
-        (self.root/'request.json').unlink(); (self.root/'active.json').write_text('{}')
-        with self.assertRaises(ValueError): cli.queue(dev.discover('42'))
+    def test_queue_pins_identity_and_keeps_durable_task_results(self):
+        result=cli.queue(dev.discover('42'))
+        self.assertRegex(result['task_id'],'^[a-f0-9]{32}$')
+        with self.assertRaises(ValueError):cli.queue(dev.discover('42'))
 
     def candidate(self):
         return {'package_kind': 'platform-update', 'version': '0.5.3', 'arch': 'amd64', 'build': {'channel': 'dev', 'commit': 'a'*40}}
@@ -181,11 +173,7 @@ class PlatformUpdateTests(unittest.TestCase):
         text = (self.root/'result.json').read_text()
         self.assertNotIn('private-token', text); self.assertEqual(json.loads(text)['phase'], 'failed')
 
-    def test_stable_uses_existing_api_and_status_survives_control_outage(self):
-        with patch.object(cli.os, 'geteuid', return_value=0), patch.object(cli, 'api', return_value={'enabled': True}) as api, contextlib.redirect_stdout(io.StringIO()):
-            cli.main(['update', 'check']); api.assert_called_with('/check', {})
-            cli.main(['upgrade', '--version', '0.5.4', '--yes']); api.assert_called_with('/upgrade', {'version': '0.5.4'})
-        (self.root/'active.json').write_text(json.dumps(dev.discover('42'))); (self.root/'active.json').chmod(0o600)
-        with patch.object(cli.os, 'geteuid', return_value=0), patch.object(cli, 'api', side_effect=AssertionError('control unavailable')), contextlib.redirect_stdout(io.StringIO()) as out:
-            cli.main(['update', 'status'])
-        self.assertEqual(json.loads(out.getvalue())['execution']['phase'], 'interrupted')
+    def test_status_survives_control_outage(self):
+        (self.root/'active.json').write_text(json.dumps(dev.discover('42')));(self.root/'active.json').chmod(0o600)
+        with patch.object(cli.os,'geteuid',return_value=0),contextlib.redirect_stdout(io.StringIO()) as out:cli.main(['update','status'])
+        self.assertEqual(json.loads(out.getvalue())['execution']['phase'],'interrupted')

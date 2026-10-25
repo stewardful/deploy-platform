@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# User-facing names live here; all application mutations still belong to Agent.
-set -Eeuo pipefail
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-export PYTHONDONTWRITEBYTECODE=1
-ROOT=/opt/deploy-platform/current
-exec python3 -I -B "$ROOT/lib/node_cli.py" "$@"

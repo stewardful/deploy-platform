@@ -36,13 +36,19 @@ docs/            设计、使用、验收和维护说明
 
 ## 安装到 Ubuntu
 
-首次安装一条命令，自动下载并校验 cloudctl，复用现有安装器，检查服务并保持自动升级关闭：
+本 monorepo 同时提供独立 cloudctl 与服务器管理平台。cloudctl 负责下载、校验、安装和升级，安装在 `/opt/cloudctl/releases/`，不从平台 current 目录加载代码。Web/Go/Rust Agent 管理项目；独立的 [deploy-webhook](https://github.com/stewardful/deploy-webhook) 只负责通知触发。
 
 ```bash
 bash -o pipefail -c 'curl -fsSL --connect-timeout 20 --max-time 120 https://github.com/stewardful/deploy-platform/releases/download/dev-latest/install.sh | sudo bash -s -- --channel dev'
 ```
 
-一行入口需本改动合并、CI 成功发布后才可下载；当前 PR 阶段不要执行尚未发布的地址。公开 dev 安装无需 GitHub token 或 deploy-delivery。正式稳定版、固定构建、离线安装和排错见 [统一首次安装](docs/install.md#统一-cloudctl-首次安装)。已有安装保持不变，后续用 `sudo cloudctl upgrade-dev --yes` 或正式 `cloudctl upgrade`；不通过重复首次安装升级。
+一行入口需本改动合并、CI 成功发布后才可下载；当前 PR 阶段不要执行尚未发布的地址。公开 dev 安装无需 GitHub token 或其他安装工具仓库。正式稳定版、固定构建、离线安装和排错见 [统一首次安装](docs/install.md#统一-cloudctl-首次安装)。已有安装保持不变，统一用 `sudo cloudctl install --channel dev` 安装/升级：同构建跳过，新构建复用保护升级；正式更新需 `--yes`。
+
+只安装 cloudctl、暂不安装平台：在上述一行命令末尾加 `--cli-only`。之后服务器只需：
+
+```bash
+sudo cloudctl install --channel dev
+```
 
 安装完成后用 `sudo cloudctl status` 检查状态，`sudo cloudctl version` 查看版本，`sudo cloudctl token` 仅在自己的终端读取登录凭据。
 

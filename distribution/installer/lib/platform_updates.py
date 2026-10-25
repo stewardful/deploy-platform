@@ -1,21 +1,14 @@
-"""CLI adapters for existing stable API and on-demand dev artifact worker."""
+"""Independent CLI discovery, policy and shared task submission."""
 import argparse
 import fcntl
 import json
 import os
 from pathlib import Path
 import re
-import sys
+import secrets
 
 import update_worker as worker
 from state import write_record
-
-
-def api(path, body=None):
-    # Reuse the node's bounded authenticated loopback client (no proxy/redirects).
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from smoke import request
-    return request('/api/v1/updates'+path, body)
 
 
 def queue(request):
@@ -26,7 +19,7 @@ def queue(request):
             path = worker.SPOOL/name
             if path.exists() or path.is_symlink():
                 raise ValueError('upgrade pending or interrupted; inspect status before retrying')
-        request = {**request, 'phase': 'queued'}
+        request = {**request, 'phase': 'queued','task_id':secrets.token_hex(16)}
         (worker.SPOOL/'result.json').unlink(missing_ok=True)
         write_record(worker.SPOOL/'request.json', request)
     return request
@@ -38,33 +31,27 @@ def main(argv):
     update = sub.add_parser('update', help='Inspect platform update discovery and execution')
     update.add_argument('action', choices=('check', 'status', 'policy'))
     update.add_argument('--dev-auto-upgrade', choices=('on', 'off'), help='Local policy only; default is off')
-    stable = sub.add_parser('upgrade', help='Queue a checked stable GitHub Release using the existing local API', allow_abbrev=False)
-    stable.add_argument('--version', required=True, help='Exact X.Y.Z from update check')
-    stable.add_argument('--yes', action='store_true', required=True, help='Explicitly approve this stable version')
-    dev = sub.add_parser('upgrade-dev', help='Inspect or queue a dev build; never selects a stable Release', allow_abbrev=False)
-    dev.add_argument('--run-id', help='Exact published dev run ID; default: latest CI-passed public prerelease')
-    dev.add_argument('--yes', action='store_true', help='Approve this dev run; otherwise inspect metadata only')
     args = p.parse_args(argv)
     if os.geteuid() != 0: raise ValueError('sudo is required')
     if args.command == 'update':
         if args.dev_auto_upgrade is not None and args.action != 'policy': raise ValueError('policy option requires update policy')
         if args.action == 'policy':
-            from notification_updates import policy
+            from install_policy import policy
             policy()  # Validate before changing any local configuration.
             cfg = json.loads(worker.private_read(worker.CONFIG, 4096)) if worker.CONFIG.exists() or worker.CONFIG.is_symlink() else {}
-            section = cfg.get('notifications', {})
-            if not isinstance(section, dict): raise ValueError('invalid local notification configuration')
+            from first_install import directory
+            directory(worker.CONFIG.parent)
+            cfg.setdefault('repository','stewardful/deploy-platform')
+            cfg.setdefault('token_file','')
             if args.dev_auto_upgrade is not None:
-                if args.dev_auto_upgrade == 'on': section['dev_auto_upgrade'] = True
-                else: section.pop('dev_auto_upgrade', None)
-                if section: cfg['notifications'] = section
-                else: cfg.pop('notifications', None)
-                write_record(worker.CONFIG, cfg)
+                cfg['dev_auto_upgrade']=args.dev_auto_upgrade=='on'
+                write_record(worker.CONFIG,cfg)
             repo, enabled = policy()
             result = {'repository': repo, 'dev_auto_upgrade': enabled}
         elif args.action == 'check':
-            result = api('/check', {})
-            if not result.get('enabled') or result.get('error'): raise ValueError('stable update check unavailable')
+            import platform
+            arch={'x86_64':'amd64','aarch64':'arm64'}.get(platform.machine())
+            result={**worker.initial_stable(None,arch),'phase':'checked'}
         else:
             # Remains available when the control service is stopped during activation.
             result = {'execution': None}
@@ -82,16 +69,4 @@ def main(argv):
                                 progress = worker.SPOOL/'result.json'
                                 if progress.exists(): result['execution'] = json.loads(worker.private_read(progress, 16384))
                     break
-    elif args.command == 'upgrade':
-        if not re.fullmatch(worker.VERSION, args.version): raise ValueError('stable X.Y.Z required')
-        # The API revalidates the checked candidate and queues the original worker.
-        result = api('/upgrade', {'version': args.version})
-    else:
-        if args.run_id is not None and not re.fullmatch(r'[1-9][0-9]{0,19}', args.run_id): raise ValueError('positive run ID required')
-        from dev_update import discover
-        result = discover(args.run_id)
-        if args.yes: result = queue(result)
-        else: result = {**result, 'phase': 'checked'}
-    print(json.dumps(result, indent=2))
-    if args.command != 'update' and (args.command != 'upgrade-dev' or args.yes):
-        print('Accepted, not yet installed. Use cloudctl update status and cloudctl system-logs update.')
+    print(json.dumps(result,indent=2))

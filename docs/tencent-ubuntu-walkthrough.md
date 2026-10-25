@@ -33,7 +33,7 @@ sudo ss -lntp
 bash -o pipefail -c 'curl -fsSL --connect-timeout 20 --max-time 120 https://github.com/stewardful/deploy-platform/releases/download/dev-latest/install.sh | sudo bash -s -- --channel dev'
 ```
 
-脚本自动校验、安装并检查服务，最终显示 `Installation verified. Dev automatic upgrades: OFF.`。不需要电脑下载上传、GitHub token 或 deploy-delivery。已有安装会拒绝覆盖，后续使用 `sudo cloudctl upgrade-dev --yes`；失败先查询状态和安装日志，详见 [一行安装与排错](install.md#统一-cloudctl-首次安装)。
+脚本自动校验、安装并检查服务，最终显示 `Installation verified. Local automation policy was preserved (default OFF).`。不需要电脑下载上传、GitHub token 或独立安装工具仓库。同构建会跳过、新构建走保护升级，后续使用 `sudo cloudctl install --channel dev`；失败先查询状态和安装日志，详见 [一行安装与排错](install.md#统一-cloudctl-首次安装)。
 
 ```bash
 sudo cloudctl status

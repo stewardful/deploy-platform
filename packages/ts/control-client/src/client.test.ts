@@ -150,13 +150,6 @@ it('discovers and explicitly approves upgrades without passing URLs or commands'
     enabled: true,
     current: '0.5.1',
     candidate: null,
-    notifications: {
-      enabled: true,
-      dev_auto_upgrade: false,
-      dev_tag: 'dev-42',
-      error: '',
-      last_attempt: null,
-    },
     checked_at: '',
     error: '',
     execution: null,

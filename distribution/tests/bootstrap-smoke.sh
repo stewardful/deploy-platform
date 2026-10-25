@@ -13,17 +13,18 @@ WORK=$(mktemp -d)
 cleanup() {
     local status=$?
     if (( status != 0 )); then
-        node_exec "$NAME" journalctl -u deploy-platform-bootstrap -u deploy-agent -u deploy-control -u bootstrap-test-https -n 100 --no-pager || true
+        node_exec "$NAME" journalctl -u 'cloudctl-install-*' -u deploy-agent -u deploy-control -u bootstrap-test-https -n 100 --no-pager || true
     fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     rm -rf -- "$WORK"
 }
 trap cleanup EXIT
-DEV_UPDATE=$(python3 "$ROOT/distribution/tests/notification-package.py" "$UPDATE" "$WORK/update")
+DEV_UPDATE=$(python3 "$ROOT/distribution/tests/dev-package.py" "$UPDATE" "$WORK/update")
 extra=()
 [[ -z ${3:-} ]] || extra+=(--runtime "$3")
 [[ -z ${4:-} ]] || extra+=(--proxy "$4")
 python3 "$ROOT/distribution/tests/bootstrap-runtime.py" "$DEV_UPDATE" "$CLI" "$WORK/fixture" "${extra[@]}"
+[[ -z ${5:-} ]] || cp -R "$5" "$WORK/fixture/webhook"
 cp "$ROOT/distribution/tests/bootstrap-runtime.py" "$WORK/fixture/"
 docker build --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" -f "$ROOT/distribution/tests/Dockerfile.ubuntu" -t "cloud-installer-test:$UBUNTU_VERSION" "$ROOT" >/dev/null
 docker run -d --name "$NAME" --privileged --cgroupns=private --cpus=2 --memory=2g --pids-limit=512 \
