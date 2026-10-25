@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Released bootstrap: download this build's verified cloudctl, reuse its installer.
+set -Eeuo pipefail
+
+@@HOST_CHECKS@@
+
+fail() { printf '[cloud] %s\n' "$*" >&2; return 1; }
+usage() {
+    cat <<'HELP'
+Usage: install.sh [--channel dev|stable] [--run-id ID | --version X.Y.Z]
+Install Deploy Platform once; dev auto-upgrade stays off.
+Uses the existing cloudctl installer, task worker and verification.
+An installed node is never overwritten; use cloudctl upgrade or upgrade-dev.
+HELP
+}
+existing_install() {
+    [[ -e /opt/deploy-platform/current || -L /opt/deploy-platform/current ||
+       -e /etc/deploy-platform/install.json || -L /etc/deploy-platform/install.json ]]
+}
+prepare_dependencies() {
+    if ! command -v curl >/dev/null || ! command -v python3 >/dev/null ||
+       [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y --no-install-recommends curl ca-certificates python3
+    fi
+}
+main() {
+    local channel='@@DEFAULT_CHANNEL@@' run_id='' version='' work=''
+    while (( $# )); do
+        case "$1" in
+            --help|-h) usage; return 0 ;;
+            --channel|--run-id|--version)
+                (( $# >= 2 )) || { fail "Missing value for $1"; return 2; }
+                case "$1" in
+                    --channel) channel=$2 ;;
+                    --run-id) run_id=$2 ;;
+                    --version) version=$2 ;;
+                esac
+                shift 2 ;;
+            *) fail "Unknown option: $1"; return 2 ;;
+        esac
+    done
+    [[ $channel == dev || $channel == stable ]] || { fail 'Channel must be dev or stable'; return 2; }
+    [[ -z $run_id || ( $channel == dev && $run_id =~ ^[1-9][0-9]{0,19}$ ) ]] || { fail '--run-id requires dev and a positive build ID'; return 2; }
+    [[ -z $version || ( $channel == stable && $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ) ]] || { fail '--version requires stable and X.Y.Z'; return 2; }
+    [[ $(id -u) == 0 ]] || { fail 'Run with sudo bash'; return 1; }
+    printf '[cloud] 1/4 Checking host and dependencies\n'
+    check_supported_os || return 1
+    case "$(uname -m)" in x86_64|aarch64) ;; *) fail 'Supported architectures: x86_64 or aarch64'; return 1 ;; esac
+    if existing_install; then
+        fail 'Existing installation detected. Use sudo cloudctl status, then upgrade or upgrade-dev; nothing was changed.'
+        return 1
+    fi
+    prepare_dependencies
+    umask 077
+    work=$(mktemp -d)
+    # Keep the downloaded CLI until the foreground wait returns; the independent
+    # worker runs from cloudctl's immutable bootstrap cache, not this directory.
+    # Freeze the safely quoted local path; EXIT runs after main's local scope ends.
+    # shellcheck disable=SC2064
+    trap "$(printf 'rm -rf -- %q' "$work")" EXIT
+    printf '[cloud] 2/4 Downloading and verifying cloudctl\n'
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location \
+        --retry 3 --connect-timeout 20 --max-time 120 --max-filesize 4194304 \
+        -o "$work/cloudctl" '@@CLI_URL@@'
+    printf '%s  %s\n' '@@CLI_SHA256@@' "$work/cloudctl" | sha256sum -c - >/dev/null || {
+        fail 'cloudctl checksum mismatch; installation was not started'; return 1;
+    }
+    local -a args=(install --channel "$channel" --repository '@@REPOSITORY@@')
+    [[ -z $run_id ]] || args+=(--run-id "$run_id")
+    [[ -z $version ]] || args+=(--version "$version")
+    printf '[cloud] 3/4 Installing; downloads may take time. Do not submit twice.\n'
+    printf '[cloud] After disconnect: sudo cloudctl update status; sudo cloudctl system-logs install\n'
+    python3 -I -B "$work/cloudctl" "${args[@]}" || {
+        fail 'Installation did not finish successfully. Inspect status/logs before retrying.'; return 1;
+    }
+    printf '[cloud] 4/4 Verifying installed services and local policy\n'
+    python3 -I -B "$work/cloudctl" update policy --dev-auto-upgrade off
+    python3 -I -B "$work/cloudctl" status
+    python3 -I -B "$work/cloudctl" version
+    printf '[cloud] Installation verified. Dev automatic upgrades: OFF.\n'
+    printf '[cloud] Web: http://127.0.0.1:8088/ on this server; use your secured access path.\n'
+    printf '[cloud] Login token stays private; view locally with sudo cloudctl token.\n'
+}
+
+# Call only after Bash has parsed the complete main function, including piped downloads.
+main "$@"

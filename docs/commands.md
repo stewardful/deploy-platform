@@ -96,6 +96,6 @@ sudo cloudctl update status
 独立 Agent 安装不需要 cloudctl、Go 或 Web。日常 cloudctl 应用命令只依赖 agentd 的 Unix Socket 和单写入者任务流程；部署方式见 [独立 Agent](agent.md)、[一键安装](install.md)。
 
 
-首次安装：`cloudctl install --channel dev|stable` 或 `cloudctl install --file INSTALLER.run`，具体获取命令、凭据和成功信号见 [统一首次安装](install.md#统一-cloudctl-首次安装)。首次安装与后续升级是同一 CLI；`install` 不允许覆盖已有平台。本地通知策略用 `cloudctl update policy` 管理；通知不会直接执行命令。
+首次安装默认使用 [一行安装入口](install.md#统一-cloudctl-首次安装)，内部复用 `cloudctl install --channel dev|stable` 或 `cloudctl install --file INSTALLER.run`，具体获取命令、凭据和成功信号见 [统一首次安装](install.md#统一-cloudctl-首次安装)。首次安装与后续升级是同一 CLI；`install` 不允许覆盖已有平台。本地通知策略用 `cloudctl update policy` 管理；通知不会直接执行命令。
 
 候选 dev 构建必须通过 cloudctl 构建、完整测试及对应架构打包；缺少其中任何任务均不接受。

@@ -28,12 +28,18 @@ jobs:
           BUILD_ARCH: ${{ inputs.arch }}
         run: python3 distribution/ci/version.py
   cli:
+    needs: validate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - run: python3 -B distribution/cli/package.py
+      - name: Build a verified one-command installation entry
+        env:
+          BOOTSTRAP_TAG: ${{ github.ref == 'refs/heads/main' && format('v{0}', needs.validate.outputs.version) || format('dev-{0}', github.run_id) }}
+        run: python3 -B distribution/cli/installer_entry.py --directory target/cli --repository "$GITHUB_REPOSITORY" --tag "$BOOTSTRAP_TAG"
+      - run: bash target/cli/install.sh --help
       - run: python3 -I -B target/cli/cloudctl install --help && python3 -I -B target/cli/cloudctl version
-      - run: cd target/cli && sha256sum -c cloudctl.sha256
+      - run: cd target/cli && sha256sum -c ./*.sha256
       - uses: actions/upload-artifact@v6
         with:
           name: cloudctl

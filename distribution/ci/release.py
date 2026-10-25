@@ -7,6 +7,8 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'cli'))
+from installer_entry import verify as verify_entry
 from version import build_metadata
 
 
@@ -62,6 +64,7 @@ def publish(repo, version, commit, directory):
         path = directory/name
         if path.is_symlink() or not path.is_file(): raise ReleaseError('cloudctl and checksum required')
         assets.append(str(path))
+    assets += list(map(str, verify_entry(directory, repo, tag)))
     if tag_commit(repo, tag) is None:
         api(repo, 'git/refs', {'ref': 'refs/tags/' + tag, 'sha': commit})
     # A default branch of dev must never influence release content or tag target.

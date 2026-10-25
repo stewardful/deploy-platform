@@ -36,17 +36,15 @@ docs/            设计、使用、验收和维护说明
 
 ## 安装到 Ubuntu
 
-从本仓库公开 dev 预发布或正式 Release 获取 cloudctl 和校验文件，在服务器校验后使用同一命令安装与升级：
+首次安装一条命令，自动下载并校验 cloudctl，复用现有安装器，检查服务并保持自动升级关闭：
 
 ```bash
-sha256sum -c cloudctl.sha256
-chmod +x cloudctl
-sudo ./cloudctl install --channel dev
-sudo cloudctl status
-sudo cloudctl token
+bash -o pipefail -c 'curl -fsSL --connect-timeout 20 --max-time 120 https://github.com/stewardful/deploy-platform/releases/download/dev-latest/install.sh | sudo bash -s -- --channel dev'
 ```
 
-公开 dev 预发布安装无需 token；正式安装用 `--channel stable`，私有 Release 需要 Contents:read。已有离线包可用 `cloudctl install --file /绝对路径/平台.run`。安装后使用 `cloudctl upgrade-dev` 或 `cloudctl upgrade`；详见 [统一首次安装](docs/install.md#统一-cloudctl-首次安装)。
+一行入口需本改动合并、CI 成功发布后才可下载；当前 PR 阶段不要执行尚未发布的地址。公开 dev 安装无需 GitHub token 或 deploy-delivery。正式稳定版、固定构建、离线安装和排错见 [统一首次安装](docs/install.md#统一-cloudctl-首次安装)。已有安装保持不变，后续用 `sudo cloudctl upgrade-dev --yes` 或正式 `cloudctl upgrade`；不通过重复首次安装升级。
+
+安装完成后用 `sudo cloudctl status` 检查状态，`sudo cloudctl version` 查看版本，`sudo cloudctl token` 仅在自己的终端读取登录凭据。
 
 电脑建立 SSH 隧道后，访问 `http://127.0.0.1:8088/` 登录；管理端保持回环监听。业务域名通过独立 Caddy 提供 HTTPS。准备安装包、示例镜像、密钥、DNS 和端口的完整步骤见 [腾讯云手册](docs/tencent-ubuntu-walkthrough.md)。
 

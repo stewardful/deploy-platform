@@ -12,9 +12,9 @@ Actions 不持有服务器登录权限，不发送远程命令，也不调用服
 
 公开构建发布使用 GitHub 自动提供的 GITHUB_TOKEN，publish job 显式声明 Contents:write 和 Actions:read；不需要自定义 Secrets、Repository variables、PAT、GitHub App 或跨仓库 CI 触发。推送 dev 的源码经过测试和 cloudctl/amd64/arm64 打包后才发布。仓库默认分支是 dev。
 
-[dev 发布工作流](../.github/workflows/dev-release.yml) 先将完整资产上传固定 `dev-RUN_ID` 草稿，再公开预发布，固定标签指向 dev 事件 SHA。已公开资产不可由流程覆盖，重跑冲突需新构建。`dev-latest` 只提供最新发现清单及 cloudctl，安装包始终从固定标签下载。旧源码或旧构建重跑不回退最新指针，预发布不成为正式 latest。
+[dev 发布工作流](../.github/workflows/dev-release.yml) 先将完整资产上传固定 `dev-RUN_ID` 草稿，再公开预发布，固定标签指向 dev 事件 SHA。已公开资产不可由流程覆盖，重跑冲突需新构建。`dev-latest` 提供最新发现清单、cloudctl 和一行安装入口 install.sh，安装包始终从固定标签下载。旧源码或旧构建重跑不回退最新指针，预发布不成为正式 latest。
 
-固定构建包含两架构平台更新包、摘要、cloudctl、dev.json；dev 包不重复打入基础运行时，按版本下载或复用。Release 附件不受 Actions 三天缓存期限影响，暂无自动清理；被删除的构建不能按编号恢复。正式版本仍保留完整离线包。
+固定构建包含两架构平台更新包、摘要、cloudctl、install.sh 及校验、dev.json；dev 包不重复打入基础运行时，按版本下载或复用。Release 附件不受 Actions 三天缓存期限影响，暂无自动清理；被删除的构建不能按编号恢复。正式版本仍保留完整离线包，并发布同一 install.sh 入口。CLI job 渲染脚本时固定来源标签和 CLI 摘要，发布前再次逐字节核对脚本、CLI 与校验文件；不接受缺失入口或其他构建生成的入口，不补充旧发布资产。
 
 main 发版前提高 workspace 和内部组件版本，更新 Cargo.lock，验证后合并 main。正式 `vX.Y.Z` 标签固定到 main 事件提交，不依赖默认分支。版本号不能被另一个提交复用，正式 Release 的检查与人工升级保护不变。
 

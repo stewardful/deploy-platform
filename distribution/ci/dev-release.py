@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'installer/lib'))
 from archive import installer_manifest, digest
 from dev_manifest import validate
 from release import api, tag_commit, ReleaseError
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'cli'))
+from installer_entry import verify as verify_entry
 from version import build_metadata
 
 
@@ -22,7 +24,7 @@ def asset(path):
 def inventory(repo, run_id, commit, version, directory):
     manifest = {'schema_version': 1, 'repository': repo, 'run_id': run_id, 'commit': commit,
                 'version': version, 'installers': {}, 'cli': asset(directory/'cloudctl')}
-    files = [directory/'cloudctl', directory/'cloudctl.sha256']
+    files = [directory/'cloudctl', directory/'cloudctl.sha256', *verify_entry(directory, repo, 'dev-'+run_id)]
     for arch in ('amd64', 'arm64'):
         path = directory/f'deploy-platform-{version}-linux-{arch}.run'
         info = installer_manifest(path)
@@ -94,7 +96,7 @@ def publish(repo, run_id, commit, version, directory):
     # Reserve the run before uploading: even a partial promotion must not allow an older rerun to replace it.
     gh('release', 'edit', 'dev-latest', '--repo', repo, '--title', f'Dev latest ({run_id})')
     # Upload discovery last. Installers are never downloaded from this mutable release.
-    gh('release', 'upload', 'dev-latest', '--repo', repo, str(directory/'cloudctl'), str(directory/'cloudctl.sha256'), '--clobber')
+    gh('release', 'upload', 'dev-latest', '--repo', repo, str(directory/'cloudctl'), str(directory/'cloudctl.sha256'), str(directory/'install.sh'), str(directory/'install.sh.sha256'), '--clobber')
     gh('release', 'upload', 'dev-latest', '--repo', repo, str(index), '--clobber')
     gh('release', 'edit', 'dev-latest', '--repo', repo, '--prerelease', '--draft=false', '--latest=false', '--title', f'Dev latest ({run_id})')
 

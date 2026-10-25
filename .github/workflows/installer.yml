@@ -37,6 +37,16 @@ jobs:
         with:
           name: deploy-platform-offline-linux-amd64
           path: offline
+      - uses: actions/download-artifact@v7
+        if: matrix.ubuntu == '26.04'
+        with:
+          name: cloudctl
+          path: bootstrap
+      - name: Verify one-command first installation on a fresh node
+        if: matrix.ubuntu == '26.04'
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+        run: bash distribution/tests/bootstrap-smoke.sh "$GITHUB_WORKSPACE"/dist/deploy-platform-*-linux-amd64.run "$GITHUB_WORKSPACE"/bootstrap/cloudctl
       - name: Install and exercise real containers on an isolated 2CPU/2GiB node
         env:
           UBUNTU_VERSION: ${{ matrix.ubuntu }}

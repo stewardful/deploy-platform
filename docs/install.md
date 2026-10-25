@@ -151,9 +151,29 @@ Ubuntu 26.04 的适配与本地安装、升级验收入口见 [Ubuntu 兼容性�
 
 ## 统一 cloudctl 首次安装
 
-公开仓库的 dev 构建发布到 GitHub 预发布 Release，服务器无需 GitHub token、GitHub CLI、Git、Rust、Go、Node 或额外交付工具。需要 Python 3、curl、systemd、cgroup v2，以及访问 GitHub/Release CDN 和 Ubuntu 软件源的网络。
+首次安装默认只需在服务器复制一条命令。Ubuntu 24.04/26.04，amd64/arm64，具有 sudo、systemd/cgroup v2，能访问 GitHub/Release CDN 与 Ubuntu 软件源；初始命令需要 curl。无需 GitHub token、GitHub CLI、Git、Rust、Go、Node 或 deploy-delivery。
 
-首次在服务器准备命令（须等本改动合并、新的发布工作流成功发布第一份预发布包后执行）：
+**一行入口随本改动的下一次成功发布提供；PR 尚未发布时该 install.sh 地址不可用。** dev 最新通过 CI 的版本：
+
+```bash
+bash -o pipefail -c 'curl -fsSL --connect-timeout 20 --max-time 120 https://github.com/stewardful/deploy-platform/releases/download/dev-latest/install.sh | sudo bash -s -- --channel dev'
+```
+
+外层 pipefail 保证入口下载失败也返回非零；脚本从函数完整定义后才开始执行。入口来自可信的官方 HTTPS Release，固定下载同一构建的 cloudctl，使用发布时嵌入的 SHA256 校验，不从可变的 dev-latest 取两个可能不同步的 CLI 文件。校验失败绝不执行下载内容。它会准备最小依赖，调用已有 cloudctl 安装流程，检查服务，打印版本与本机 Web 地址；不输出登录密钥，不新增常驻进程。安装成功会显示 `Installation verified. Dev automatic upgrades: OFF.`，dev 自动升级始终缺省关闭。
+
+系统、架构、磁盘和安装任务错误会明确停止；已有安装不覆盖、不自动升级或改动其策略。安装失败、超时或连接中断后先执行 `sudo cloudctl update status`、`sudo cloudctl system-logs install`，不要重复提交。脚本临时下载目录会清理，后台安装使用现有 root 私有 bootstrap 缓存，不受前台退出影响。
+
+正式稳定版在对应 Release 发布同一入口：
+
+```bash
+bash -o pipefail -c 'curl -fsSL --connect-timeout 20 --max-time 120 https://github.com/stewardful/deploy-platform/releases/latest/download/install.sh | sudo bash -s -- --channel stable'
+```
+
+可附加 `--run-id ID` 固定 dev 构建，或 `--channel stable --version X.Y.Z` 固定正式版本。原始 CLI 的高级参数与本地离线安装继续使用下面的直接调用方式。
+
+### 手动下载与排错
+
+需要逐步核对时，可以在服务器手动下载：
 
 ```bash
 mkdir -p ~/deploy-platform-bootstrap
@@ -196,8 +216,8 @@ sudo cloudctl upgrade-dev --yes
 ## 构建产物位置
 
 - Actions Artifacts：`cloudctl`（14 天）、`deploy-platform-linux-amd64/arm64`（dev 更新包 3 天）；PR 另有完整离线验证包（3 天）。这些是 CI 中间产物，不是服务器手动安装的数据源。
-- GitHub Releases：每次成功 dev 构建发布 `dev-RUN_ID` 预发布，包含 cloudctl、校验文件、两架构平台更新包和 dev.json；`dev-latest` 只放最新发现清单和 cloudctl 两个小文件。预发布不自动过期，不覆盖固定构建资产，暂无自动清理；删除后无法再用该构建编号安装。
-- 正式 `vX.Y.Z` Release：cloudctl、两种架构完整离线包及摘要。dev 只打平台更新包，基础运行时按锁定版本下载或复用。
+- GitHub Releases：每次成功 dev 构建发布 `dev-RUN_ID` 预发布，包含 cloudctl、install.sh、各自校验文件、两架构平台更新包和 dev.json；`dev-latest` 提供最新发现清单、cloudctl 与校验、一行 install.sh 与校验。入口固定引用不可变 dev 构建的 CLI。预发布不自动过期，不覆盖固定构建资产，暂无自动清理；删除后无法再用该构建编号安装。
+- 正式 `vX.Y.Z` Release：cloudctl、install.sh、两种架构完整离线包及各自摘要。dev 只打平台更新包，基础运行时按锁定版本下载或复用。
 - 安装后的服务器：`/opt/deploy-platform/releases/` 存放不可变版本，`current` 指向当前版本；配置在 `/etc/deploy-platform/`，业务数据在 `/var/lib/deploy-platform/`。
 
 自动通知升级仅通过现有 Go 控制端接收已验签 Webhook，dev 开关默认关闭，正式版只提示。使用 `sudo cloudctl update policy --dev-auto-upgrade on` 开启 dev 自动升级；详见 [CI/CD](ci-cd.md)。没有 SSH 自动部署或 cloudctl delivery 入口。

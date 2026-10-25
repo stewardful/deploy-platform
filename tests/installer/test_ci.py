@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'distribution/ci'))
 import version as ci_version
 import release as ci_release
+from installer_entry import build as build_entry
 SHA = 'a'*40
 
 
@@ -31,7 +32,9 @@ class CIPolicyTests(unittest.TestCase):
     def test_publish_pins_tag_to_sha_and_only_then_publishes(self):
         with tempfile.TemporaryDirectory() as directory:
             dist=Path(directory)
-            for name in ('cloudctl', 'cloudctl.sha256'): (dist/name).touch()
+            (dist/'cloudctl').write_bytes(b'cli')
+            (dist/'cloudctl.sha256').write_text(hashlib.sha256(b'cli').hexdigest()+'  cloudctl\n')
+            build_entry(dist,'owner/repo','v1.0.0')
             for arch in ('amd64','arm64'):
                 for suffix in ('.run','.tar.gz','.sha256'):
                     (dist/f'deploy-platform-1.0.0-linux-{arch}{suffix}').touch()
@@ -46,8 +49,10 @@ class CIPolicyTests(unittest.TestCase):
     def test_same_commit_rerun_never_overwrites_published_assets(self):
         with tempfile.TemporaryDirectory() as directory:
             dist=Path(directory);assets=[]
-            for name in ('cloudctl', 'cloudctl.sha256'):
-                (dist/name).touch(); assets.append({'name': name})
+            (dist/'cloudctl').write_bytes(b'cli')
+            (dist/'cloudctl.sha256').write_text(hashlib.sha256(b'cli').hexdigest()+'  cloudctl\n')
+            build_entry(dist,'owner/repo','v1.0.0')
+            for name in ('cloudctl','cloudctl.sha256','install.sh','install.sh.sha256'): assets.append({'name':name})
             for arch in ('amd64','arm64'):
                 for suffix in ('.run','.tar.gz','.sha256'):
                     name=f'deploy-platform-1.0.0-linux-{arch}{suffix}'

@@ -20,3 +20,5 @@ CLOUD_TEST_WEB_UPDATE=1 bash distribution/tests/upgrade-smoke.sh /ABS/bootstrap-
 此模式只在脚本创建的可删除 Ubuntu 节点内安装隔离 GitHub HTTPS 测试端点与 CA，通过真实 Go API、私有凭据、systemd.path 和下载器执行升级；不会配置生产自定义下载地址。启动包必须含网页更新器且版本低于目标包；演示镜像需为 `cloud-fullstack-demo:upgrade-check`。默认模式保留原有手动升级验收。
 
 发布组件测试见 `tests/installer/test_ci.py`：版本/架构策略、main 提交标签与发布幂等。通知客户端和自动策略由 Go/Python 组件测试验证；真实签名 Webhook → Go → 独立 worker → HTTPS dev 包 → 原安装器链路可执行 `bash distribution/tests/notification-smoke.sh /ABS/offline.run /ABS/update.run`，仅创建可删除的 Ubuntu 节点，不连接用户服务器。
+
+一行入口：`tests/installer/test_install_entry.py` 验证固定 CLI 地址与摘要、默认关闭自动升级、错误/已有安装/超时保护。`bash distribution/tests/bootstrap-smoke.sh /ABS/update.run /ABS/cloudctl` 在全新 Ubuntu 26.04 节点执行实际 HTTPS curl 管道，覆盖损坏 CLI 拒绝、缺少 Python 自动准备、正式入队安装、服务验收及重复执行不改动安装/凭据。cloudctl 同目录须有 CI 生成的 install.sh 和两个校验文件；本地构造 fixture 使用 dev-42，CI 使用当前 run ID；可选第三/四参数提供锁定 runtime/Caddy 归档以避免重复下载。HTTPS 源为本机测试 CA 和固定 GitHub 路径的隔离 fixture，不是生产下载覆盖参数，也不连接用户服务器。

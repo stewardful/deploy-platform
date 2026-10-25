@@ -26,6 +26,6 @@ make release-build
 
 [安装指南](../docs/install.md) · [手工 Agent 集成](../docs/agent.md) · [测试与上云验收](../docs/acceptance.md)
 
-`cli/` 构建通用 cloudctl 命令；首次安装和后续升级共用 installer/lib 中的下载、状态和安装逻辑。
+`cli/` 构建通用 cloudctl 命令和薄 install.sh 引导入口；首次安装和后续升级共用 installer/lib 中的下载、状态和安装逻辑。
 
 公开 dev 预发布分发 cloudctl 和两架构平台更新包，无需服务器 token；dev 自动升级通过本机策略开启，默认关闭。
